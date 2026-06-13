@@ -1,12 +1,67 @@
 {
-  "name": "@smai-kit/smink",
-  "version": "0.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
+  "name": "smink",
+  "version": "0.1.0",
+  "description": "A standalone TUI framework based on Ink (React for CLI), extracted from Claude Code's customized Ink runtime",
+  "type": "module",
   "author": "sumu",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "demo": "npx tsx examples/demo.tsx",
+    "hello": "npx tsx examples/hello.tsx",
+    "layout": "npx tsx examples/layout.tsx",
+    "chat": "npx tsx examples/chat.tsx",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "cli",
+    "ink",
+    "react",
+    "terminal",
+    "tui",
+    "yoga",
+    "flexbox"
+  ],
   "license": "MIT",
-  "description": ""
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "dependencies": {
+    "@alcalzone/ansi-tokenize": "^0.3.0",
+    "auto-bind": "^4.0.0",
+    "bidi-js": "^1.0.3",
+    "chalk": "^5.0.0",
+    "cli-boxes": "^3.0.0",
+    "code-excerpt": "^4.0.0",
+    "dotenv": "^17.4.2",
+    "emoji-regex": "^10.0.0",
+    "get-east-asian-width": "^1.3.0",
+    "indent-string": "^5.0.0",
+    "lodash-es": "^4.17.21",
+    "openai": "^6.42.0",
+    "react-reconciler": "^0.31.0",
+    "semver": "^7.8.4",
+    "signal-exit": "^4.0.0",
+    "stack-utils": "^2.0.6",
+    "strip-ansi": "^7.0.0",
+    "supports-hyperlinks": "^3.0.0",
+    "type-fest": "^5.7.0",
+    "usehooks-ts": "^3.1.1",
+    "wrap-ansi": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/semver": "^7.7.1",
+    "react": "^19.0.0",
+    "tsx": "^4.22.4",
+    "typescript": "^5.7.0"
+  }
 }
