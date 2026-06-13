@@ -1,6 +1,6 @@
 {
-  "name": "smink",
-  "version": "0.1.0",
+  "name": "@smai-kit/smink",
+  "version": "0.0.1",
   "description": "A standalone TUI framework based on Ink (React for CLI), extracted from Claude Code's customized Ink runtime",
   "type": "module",
   "author": "sumu",
@@ -20,7 +20,10 @@
     "chat": "npx tsx examples/chat.tsx",
     "test:early": "npx tsx examples/early-input-test.tsx",
     "test:early:seed": "npx tsx examples/early-input-test.tsx --seed 'hello world 自动注入的文本'",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "pack:dry-run": "npm pack --dry-run",
+    "pack:tgz": "npm pack",
+    "pack:list": "tar -tzf smai-kit-smink-%npm_package_version%.tgz"
   },
   "keywords": [
     "cli",
@@ -67,5 +70,8 @@
     "tsc-alias": "^1.8.17",
     "tsx": "^4.22.4",
     "typescript": "^5.7.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

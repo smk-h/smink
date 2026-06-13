@@ -1,7 +1,7 @@
 node_modules
 out
 dist
-
+*.tgz
 # npm token — 禁止提交含认证信息的 .npmrc
 .npmrc
 .env
