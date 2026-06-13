@@ -350,7 +350,7 @@ export default class App extends PureComponent<Props, State> {
       // permanently wedge the stream: data stays buffered and 'readable'
       // never re-emits. Catching here ensures the stream stays healthy so
       // subsequent keystrokes are still delivered.
-      logError('App stdin', error);
+      logError(new Error(`[App stdin] ${error}`));
 
       // Re-attach the listener in case the exception detached it.
       // Bun may remove the listener after an error; without this,

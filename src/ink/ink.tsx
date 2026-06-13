@@ -1573,7 +1573,7 @@ export default class Ink {
     const con = console;
     const originals: Partial<Record<keyof Console, Console[keyof Console]>> = {};
     const toDebug = (...args: unknown[]) => logForDebugging(`console.log: ${format(...args)}`);
-    const toError = (...args: unknown[]) => logError('console', new Error(`console.error: ${format(...args)}`));
+    const toError = (...args: unknown[]) => logError(new Error(`console.error: ${format(...args)}`));
     for (const m of CONSOLE_STDOUT_METHODS) {
       originals[m] = con[m];
       con[m] = toDebug;
