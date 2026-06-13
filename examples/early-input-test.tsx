@@ -34,8 +34,20 @@ startCapturingEarlyInput()
 
 // 2. 解析 --seed 参数，自动注入预输入文本（无需手动打字）
 const seedIdx = process.argv.indexOf('--seed')
-if (seedIdx !== -1 && process.argv[seedIdx + 1]) {
-  seedEarlyInput(process.argv[seedIdx + 1]!)
+if (seedIdx !== -1) {
+  const seedArgs = process.argv.slice(seedIdx + 1)
+  // 第一个参数如果以引号开头，说明 shell 没有正确解析，尝试拼接后续参数
+  // 否则直接取第一个参数（shell 正确解析了带空格的字符串）
+  if (seedArgs.length > 0) {
+    const first = seedArgs[0]!
+    if (first.startsWith("'") || first.startsWith('"')) {
+      // Shell 未正确解析引号，拼接所有参数并去除首尾引号
+      const raw = seedArgs.join(' ')
+      seedEarlyInput(raw.slice(1, raw.endsWith("'") || raw.endsWith('"') ? -1 : undefined))
+    } else {
+      seedEarlyInput(first)
+    }
+  }
 }
 
 function TestApp() {

@@ -102,13 +102,25 @@ function processChunk(str: string): void {
     }
 
     // Skip escape sequences (arrow keys, function keys, focus events, etc.)
-    // All escape sequences start with ESC (0x1B) and end with a byte in 0x40-0x7E
+    // Format: ESC (0x1B) followed by:
+    //   - CSI: ESC [ <params 0x20-0x3F> <final 0x40-0x7E>  (arrow keys, mouse, etc.)
+    //   - SS3: ESC O <final 0x40-0x7E>                      (F1-F4, app cursor)
+    //   - SS2: ESC N <final 0x40-0x7E>                      (rare)
+    //   - Simple: ESC <0x40-0x5F>                           (2-byte sequences)
     if (code === 27) {
       i++ // Skip the ESC character
-      // Skip until the terminating byte (@ to ~) or end of string
+      // For CSI ([), SS3 (O), and SS2 (N), skip the second byte first
+      // so the terminator search starts after it
+      if (i < str.length) {
+        const c = str.charCodeAt(i)
+        if (c === 0x5B /* [ */ || c === 0x4F /* O */ || c === 0x4E /* N */) {
+          i++ // Skip [ or O or N
+        }
+      }
+      // Skip parameter/intermediate bytes (0x00-0x3F) until the terminating byte (0x40-0x7E)
       while (
         i < str.length &&
-        !(str.charCodeAt(i) >= 64 && str.charCodeAt(i) <= 126)
+        !(str.charCodeAt(i) >= 0x40 && str.charCodeAt(i) <= 0x7E)
       ) {
         i++
       }

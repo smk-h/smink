@@ -19,7 +19,7 @@
     "demo:layout": "npx tsx examples/layout.tsx",
     "demo:chat": "npx tsx examples/chat.tsx",
     "test:early": "npx tsx examples/early-input-test.tsx",
-    "test:early:seed": "npx tsx examples/early-input-test.tsx --seed 'hello world 自动注入的文本'",
+    "test:early:seed": "npx tsx examples/early-input-test.tsx --seed \"hello world 自动注入的文本\"",
     "pack:dry-run": "npm pack --dry-run",
     "pack:tgz": "npm pack",
     "pack:list": "tar -tzf smai-kit-smink-%npm_package_version%.tgz"
