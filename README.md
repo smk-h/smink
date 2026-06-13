@@ -207,6 +207,36 @@ smink/
 
 ## 工具模块
 
+### React Compiler 存根方案
+
+smink 的组件源码中包含 `import { c as _c } from "react/compiler-runtime"` 调用，这与 Claude Code 源码完全一致。但在运行时，smink 通过 `tsconfig.json` 的 `paths` 映射将 `react/compiler-runtime` 解析到本地存根 `src/ink/compiler-runtime-stub.ts`：
+
+```ts
+// tsconfig.json
+"paths": {
+  "react/compiler-runtime": ["./src/ink/compiler-runtime-stub"]
+}
+
+// compiler-runtime-stub.ts
+export function c(_size: number): (value: any) => any {
+  return (value: any) => value  // 透传，不做缓存
+}
+```
+
+**为什么使用存根而非真正的 React Compiler：**
+
+- React Compiler 在**编译时**将 `_c()` 缓存分配器注入组件代码，`react/compiler-runtime` 是其运行时支持包，只在经过 Compiler 编译后才可解析
+- smink 的组件中的 `_c()` 调用是 Claude Code 编译后的残留，如果 smink 自己再跑一次 Compiler 会导致**二次编译**冲突
+- 存根的 `_c()` 返回恒等函数 `(value) => value`，功能上**完全等价**——只是不做自动 memoization
+
+**为什么不需要升级到真正的 React Compiler：**
+
+1. **收益极低** — React Compiler 的核心价值是自动 memoization 减少重渲染，但终端 UI 组件树简单且浅，Ink 已自带双缓冲差分渲染优化，Compiler 带来的性能提升可忽略
+2. **构建复杂度大增** — 当前构建只需 `tsc`，加入 Compiler 需要 `babel-plugin-react-compiler` + 完整构建管线，开发时 `npx tsx` 直接运行也会失效
+3. **源码已对齐** — import 语句与 Claude Code 完全一致，将来如果确实需要，只需安装 Compiler + 移除 paths 映射即可切换，零代码改动
+
+**总结**：存根是功能正确的降级方案，在保持源码与上游一致的前提下，避免了不必要的构建依赖。
+
 smink 提取自 Claude Code 的完整应用源码，其中 `utils/` 和 `bootstrap/` 包含了 TUI 运行所必需的基础设施。
 
 ### `bootstrap/state.ts` — 启动状态管理

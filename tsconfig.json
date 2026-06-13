@@ -18,7 +18,8 @@
     "rootDir": "./src",
     "baseUrl": ".",
     "paths": {
-      "src/*": ["./src/*"]
+      "src/*": ["./src/*"],
+      "react/compiler-runtime": ["./src/ink/compiler-runtime-stub"]
     },
     "types": ["node"],
     "noUnusedLocals": false,
