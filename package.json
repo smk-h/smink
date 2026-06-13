@@ -18,6 +18,8 @@
     "hello": "npx tsx examples/hello.tsx",
     "layout": "npx tsx examples/layout.tsx",
     "chat": "npx tsx examples/chat.tsx",
+    "test:early": "npx tsx examples/early-input-test.tsx",
+    "test:early:seed": "npx tsx examples/early-input-test.tsx --seed 'hello world 自动注入的文本'",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
