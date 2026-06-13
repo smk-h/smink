@@ -14,9 +14,102 @@ smink 是一个基于 React 的独立终端 UI 框架，提取自 [Claude Code](
 
 ## 二、 安装
 
+### 1. 在线安装
+
 ```bash
-npm install smink react react-reconciler
+npm install @smai-kit/smink react react-reconciler
 ```
+
+消费项目只需常规配置，`react` 由消费方提供（smink 仅在 `peerDependencies` 中声明），无需配置 `paths` 别名或 `postinstall` 钩子。
+
+### 2. 本地调试
+
+本地调试 smink 时，需要模拟与线上 `npm install @smai-kit/smink` 一致的安装行为。【**核心原则**】通过 `npm pack` 生成 tgz 包再安装，而非直接 `npm install ../smink` 目录链接。
+
+#### 2.1 为什么不直接 `npm install ../smink`
+
+| 方式 | 行为 | 问题 |
+| - | - | - |
+| `npm install ../smink` | 将整个目录链接到项目中 | smink 内部独立的 `react` 导致双实例；路径别名 `src/`、`react/compiler-runtime` 在源码中存在但编译产物已替换 |
+| `npm install ../smink/dist` | `dist/` 目录没有 `package.json` | npm 无法识别为包，安装失败 |
+| `npm install tgz` | 只包含 `files` 字段指定的 `dist/`，不安装 `devDependencies` | 与线上行为完全一致 |
+
+#### 2.2 构建配置
+
+smink 的 [`tsconfig.json`](tsconfig.json) 中配置了路径别名：
+
+```json
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "src/*": ["./src/*"],
+      "react/compiler-runtime": ["./src/ink/compiler-runtime-stub.js"]
+    }
+  }
+}
+```
+
+- `src/*` 别名：源码中使用 `from 'src/utils/debug.js'` 等导入，编译后由 `tsc-alias` 替换为相对路径
+- `react/compiler-runtime` 别名：编译后替换为 `from "./compiler-runtime-stub.js"` 或 `from "../compiler-runtime-stub.js"`
+- paths 中的目标路径**必须带 `.js` 后缀**，否则 tsc-alias 替换后产物缺少扩展名，Node.js 无法解析
+
+[`package.json`](package.json) 关键字段：
+
+```json
+{
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  }
+}
+```
+
+- `files: ["dist"]`：npm pack 只打包 `dist/` 目录，不包含源码和 devDependencies
+- `react` 不在 `dependencies` 中，仅作为 `peerDependencies`
+
+#### 2.3 调试流程
+
+```bash
+# 1) 在 smink 目录构建并打包
+cd smink
+npm run build          # tsc && tsc-alias
+npm run pack:tgz       # 生成 smai-kit-smink-0.0.1.tgz
+
+# 2) 在消费项目中安装 tgz
+cd ../smink_demo
+npm install ../smink/smai-kit-smink-0.0.1.tgz
+
+# 3) 开发与运行
+npm run dev            # tsx src/demo.tsx
+npm run build          # tsc
+npm run start          # node dist/demo.js
+```
+
+修改 smink 源码后消费项目未生效时，需重新执行上述打包和安装流程。
+
+#### 2.4 验证安装正确性
+
+```bash
+# 确认 React 单实例（无重复）
+npm ls react
+
+# 确认路径别名已替换（不应有 src/ 或 react/compiler-runtime 残留）
+grep -r "from 'src/" node_modules/@smai-kit/smink/dist/
+grep -r "react/compiler-runtime" node_modules/@smai-kit/smink/dist/
+# 两者均应无结果
+```
+
+#### 2.6 常见问题排查
+
+| 问题 | 原因 | 解决 |
+| - | - | - |
+| `Cannot find package 'src'` | 编译产物中路径别名未被替换 | 确认 `tsc-alias` 已安装并在 build 脚本中执行 |
+| `Cannot read properties of null (reading 'useState')` | 存在两个 `react` 实例 | 确认 smink 的 `react` 仅在 `peerDependencies` 中声明；使用 tgz 方式安装 |
+| `Cannot find module '.../compiler-runtime-stub'` | tsconfig paths 目标路径未带 `.js` 后缀 | 在 paths 中加上 `.js`：`["./src/ink/compiler-runtime-stub.js"]` |
+| 修改 smink 后消费项目未生效 | `node_modules` 中仍是旧 tgz 内容 | 重新执行 `npm run build && npm run pack:tgz` 并重新安装 |
 
 ## 三、 快速开始
 
