@@ -18,6 +18,7 @@
     "demo:hello": "npx tsx examples/hello.tsx",
     "demo:layout": "npx tsx examples/layout.tsx",
     "demo:chat": "npx tsx examples/chat.tsx",
+    "demo:claude": "npx tsx examples/claude-code-ui.tsx",
     "test:early": "npx tsx examples/early-input-test.tsx",
     "test:early:seed": "npx tsx examples/early-input-test.tsx --seed \"hello world 自动注入的文本\"",
     "pack:dry-run": "npm pack --dry-run",
