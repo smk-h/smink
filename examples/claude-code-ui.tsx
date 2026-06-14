@@ -29,7 +29,9 @@ import {
   ScrollBox,
   useInput,
   useApp,
+  colorize,
 } from '../src/index.js'
+import { stringWidth } from '../src/ink/stringWidth.js'
 import OpenAI from 'openai'
 import dotenv from 'dotenv'
 import { fileURLToPath } from 'url'
@@ -96,43 +98,222 @@ const F = {
   middot: '\u00B7',
 }
 
+// ─── Clawd 吉祥物（仿 Claude Code 源码 Clawd.tsx）─────────
+// 默认姿态 9 列宽，3 行高
+//  ▐▛███▜▌
+//  ▝▜█████▛▘
+//    ▘▘ ▝▝
+
+const Clawd = () => (
+  <Box flexDirection="column">
+    <Text>
+      <Text color={C.claude}>{' ▐'}</Text>
+      <Text color={C.claude} backgroundColor={C.clawdBg}>{'▛███▜'}</Text>
+      <Text color={C.claude}>{'▌'}</Text>
+    </Text>
+    <Text>
+      <Text color={C.claude}>{'▝▜'}</Text>
+      <Text color={C.claude} backgroundColor={C.clawdBg}>{'█████'}</Text>
+      <Text color={C.claude}>{'▛▘'}</Text>
+    </Text>
+    <Text color={C.claude}>{'  ▘▘ ▝▝  '}</Text>
+  </Box>
+)
+
+// ─── 左列宽度计算（仿 Claude Code logoV2Utils.ts）───────────
+
+const MAX_LEFT_WIDTH = 50
+const CLAWD_ART_MIN_WIDTH = 20 // 与 Claude Code logoV2Utils.ts 一致
+
+/** 根据左列内容动态计算最优宽度 */
+function calculateOptimalLeftWidth(
+  greeting: string,
+  cwd: string,
+  modelLine: string,
+): number {
+  const contentWidth = Math.max(
+    stringWidth(greeting),
+    stringWidth(cwd),
+    stringWidth(modelLine),
+    CLAWD_ART_MIN_WIDTH,
+  )
+  return Math.min(contentWidth + 4, MAX_LEFT_WIDTH) // +4 for padding
+}
+
+// ─── 欢迎栏组件（仿 Claude Code LogoV2 布局）──────────────
+
+interface WelcomeBannerProps {
+  /** 应用名 + 版本标题，如 "Claude Code v2.1.175" */
+  title?: string
+  /** 欢迎语，如 "Welcome back!" */
+  greeting?: string
+  /** 模型名 */
+  model?: string
+  /** 当前工作目录 */
+  cwd?: string
+  /**
+   * - true  → 订阅用户，显示套餐名（如 "Claude Pro"）
+   * - false → API Key 用户，显示 "API Usage Billing"
+   */
+  isSubscriber?: boolean
+  /** 订阅套餐名，仅 isSubscriber=true 时生效 */
+  subscriptionName?: string
+  /** 右列 Feed 条目列表 */
+  feeds?: Array<{ heading: string; items: string[] }>
+}
+
+const WelcomeBanner = ({
+  title = 'Claude Code',
+  greeting = 'Welcome back!',
+  model = MODEL_NAME,
+  cwd = process.cwd(),
+  isSubscriber = false,
+  subscriptionName = 'Claude Pro',
+  feeds,
+}: WelcomeBannerProps) => {
+  const defaultFeeds: NonNullable<WelcomeBannerProps['feeds']> = [
+    { heading: 'Recent activity', items: ['No recent sessions'] },
+    { heading: "What's new", items: ['Check /release-notes for updates'] },
+  ]
+  const feedList = feeds ?? defaultFeeds
+
+  // 计费类型：与 Claude Code logoV2Utils.getLogoDisplayData 一致
+  // isClaudeAISubscriber() ? getSubscriptionName() : 'API Usage Billing'
+  const billingType = isSubscriber ? subscriptionName : 'API Usage Billing'
+
+  // 动态计算左列宽度（仿 Claude Code logoV2Utils.calculateOptimalLeftWidth）
+  const modelLine = `${model} ${F.middot} ${billingType}`
+  const leftWidth = calculateOptimalLeftWidth(greeting, cwd, modelLine)
+
+  // 边框标题：与 Claude Code LogoV2 源码 formatBorderTitle 一致
+  // color("claude", userTheme)("Claude Code") → foreground only, 无背景色
+  const borderTitle = ` ${colorize(title, C.claude, 'foreground')} ${colorize('v2.1.175', C.inactive, 'foreground')} `
+
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={C.claude}
+      borderText={{
+        content: borderTitle,
+        position: 'top',
+        align: 'start',
+        offset: 3,
+      }}
+      paddingX={1}
+    >
+      <Box flexDirection="row">
+        {/* 左列：欢迎语 + Clawd 吉祥物 + 模型信息 — 宽度由内容动态决定 */}
+        <Box flexDirection="column" width={leftWidth} alignItems="center" paddingY={1}>
+          <Box marginBottom={1}>
+            <Text color={C.inactive}>{greeting}</Text>
+          </Box>
+          <Clawd />
+          <Box flexDirection="column" alignItems="center" marginTop={1}>
+            <Text color={C.inactive} dim>{model} {F.middot} {billingType}</Text>
+            <Text color={C.inactive} dim>{cwd}</Text>
+          </Box>
+        </Box>
+
+        {/* 竖线分隔：与 Claude Code 源码 borderColor="claude" borderDimColor 一致 */}
+        <Box
+          borderStyle="single"
+          borderColor={C.claude}
+          borderDimColor
+          borderLeft
+          borderRight={false}
+          borderTop={false}
+          borderBottom={false}
+        />
+
+        {/* 右列：Feed 信息 */}
+        <Box flexDirection="column" flexGrow={1} paddingLeft={1}>
+          {feedList.map((feed, i) => (
+            <Box
+              key={feed.heading}
+              flexDirection="column"
+              marginBottom={i < feedList.length - 1 ? 1 : 0}
+              marginTop={i > 0 ? 1 : 0}
+            >
+              <Text color={C.claude} bold>{feed.heading}</Text>
+              {feed.items.map(item => (
+                <Text key={item} dim>{F.middot} {item}</Text>
+              ))}
+            </Box>
+          ))}
+        </Box>
+      </Box>
+    </Box>
+  )
+}
+
 // ─── Claude Code 风格色彩方案 ─────────────────────
+// 完全对齐 Claude Code darkTheme (theme.ts → darkTheme L440-515)
+// 所有颜色值均从源码逐字段提取，注释标注对应的 darkTheme 字段名
 
-// 尽量贴近 Claude Code 终端的暗色调
-const C = {
-  // 用户消息 - 白色/亮色
-  userText: 'ansi:white',
+const _T = {
+  // ── 基础文字色 ──
+  text:                  'rgb(255,255,255)',  // darkTheme.text — 主文字色（白）
+  subtle:                'rgb(80,80,80)',     // darkTheme.subtle — 暗灰辅助文字
+  inactive:              'rgb(153,153,153)',  // darkTheme.inactive — 非活跃/灰色文字
 
-  // 思考状态文字 - 灰色 dim（核心特征）
-  thoughtDim: 'ansi:blackBright',
+  // ── Claude 品牌色 ──
+  claude:                'rgb(215,119,87)',   // darkTheme.claude — Claude 品牌橙
+  claudeShimmer:         'rgb(235,159,127)',  // darkTheme.claudeShimmer — 橙色高亮
 
-  // AI 回复正文 - 默认白色
-  responseText: 'ansi:white',
+  // ── 吉祥物 Clawd ──
+  clawdBody:             'rgb(215,119,87)',   // darkTheme.clawd_body — 与 claude 相同
+  clawdBg:               'rgb(0,0,0)',        // darkTheme.clawd_background — 纯黑
 
-  // 提示符 ❯
-  promptChar: 'ansi:white',
+  // ── 提示符 / 边框 ──
+  promptBorder:          'rgb(136,136,136)',  // darkTheme.promptBorder — 中灰边框
+  promptBorderShimmer:   'rgb(166,166,166)',  // darkTheme.promptBorderShimmer — 亮灰
 
-  // 缩进符号 ⎿
-  indentBracket: 'ansi:blackBright',
+  // ── 语义色 ──
+  error:                 'rgb(255,107,128)',  // darkTheme.error — 亮红
+  success:               'rgb(78,186,101)',   // darkTheme.success — 亮绿
+  warning:               'rgb(255,193,7)',    // darkTheme.warning — 琥珀
+  permission:            'rgb(177,185,249)',  // darkTheme.permission — 浅蓝紫
+  suggestion:            'rgb(177,185,249)',  // darkTheme.suggestion — 浅蓝紫
+  background:            'rgb(0,204,204)',    // darkTheme.background — 青色
 
-  // 项目符号 ●
-  bullet: 'ansi:white',
+  // ── Diff 色彩 ──
+  diffAdded:             'rgb(34,92,43)',     // darkTheme.diffAdded — 深绿
+  diffRemoved:           'rgb(122,41,54)',    // darkTheme.diffRemoved — 深红
 
-  // 完成状态 ✻ — 灰色
-  workedDim: 'ansi:blackBright',
+  // ── Bash / 工具边框 ──
+  bashBorder:            'rgb(253,93,177)',   // darkTheme.bashBorder — 亮粉
 
-  // ✻ Spinner 图标 — Claude 品牌橙 rgb(215,119,87)
-  claude: 'ansi256(215)',
+  // ── 计划模式 / IDE ──
+  planMode:              'rgb(72,150,140)',   // darkTheme.planMode — 灰绿
+  ide:                   'rgb(71,130,200)',   // darkTheme.ide — 暗蓝
 
-  // 底部提示栏
-  hintDim: 'ansi:blackBright',
+  // ── 选中 / 快捷模式 ──
+  autoAccept:            'rgb(175,135,255)',  // darkTheme.autoAccept — 电紫
+  fastMode:              'rgb(255,120,20)',   // darkTheme.fastMode — 亮橙
+  chromeYellow:          'rgb(251,188,4)',    // darkTheme.chromeYellow — Chrome 黄
 
-  // 标题栏
-  titleText: 'ansi:red',       // Claude Code 用红色标题
-  titleDim: 'ansi:blackBright',
+  // ── TUI V2 背景 ──
+  userMsgBg:             'rgb(55,55,55)',     // darkTheme.userMessageBackground
+  userMsgBgHover:        'rgb(70,70,70)',     // darkTheme.userMessageBackgroundHover
+  selectionBg:           'rgb(38,79,120)',    // darkTheme.selectionBg
+  bashMsgBg:             'rgb(65,60,65)',     // darkTheme.bashMessageBackgroundColor
+} as const
 
-  // 错误
-  error: 'ansi:red',
+// 带别名的完整色彩对象 — 别名直接引用同一值，保证单一数据源
+const C: Record<string, string> = {
+  ..._T,
+  // ── 语义别名（组件内可读性）──
+  userText:         _T.text,          // 用户消息文字色
+  thoughtDim:       _T.subtle,        // 思考状态暗灰
+  responseText:     _T.text,          // AI 回复正文
+  promptChar:       _T.text,          // 提示符 ❯
+  indentBracket:    _T.inactive,      // 缩进符号 ⎿
+  bullet:           _T.text,          // 项目符号 ●
+  workedDim:        _T.inactive,      // 完成状态 ✻
+  hintDim:          _T.promptBorder,  // 底部提示栏 / 边框
+  feedHeading:      _T.claude,        // Feed 标题用品牌橙
+  feedItem:         _T.subtle,        // Feed 内容暗灰
 }
 
 // ─── 工具函数 ─────────────────────────────────────
@@ -640,29 +821,8 @@ const App = () => {
 
   return (
     <Box flexDirection="column" height="100%">
-      {/* ===== 顶部标题栏（仿 Claude Code Welcome） ===== */}
-      <Box
-        flexDirection="column"
-        borderBottom
-        borderColor={C.titleDim}
-        borderStyle="single"
-        paddingX={1}
-      >
-        <Box justifyContent="space-between" alignItems="center">
-          <Box flexDirection="row" alignItems="center" gap={1}>
-            <Text color={C.titleText} bold>Claude Code</Text>
-            <Text color={C.titleDim}>v2.1.175</Text>
-          </Box>
-          <Text color={C.titleDim}>deepseek-v4-pro [im] · API Usage Billing/workspace</Text>
-        </Box>
-        <Box marginTop={1} marginBottom={1}>
-          <Text color={C.titleDim}>Welcome back!</Text>
-        </Box>
-        <Box flexDirection="column" marginBottom={1}>
-          <Text color={C.titleDim}>Tips for getting started</Text>
-          <Text color={C.titleDim} dim>Run /init to create a CLAUDE.md file with instructions for Claude</Text>
-        </Box>
-      </Box>
+      {/* ===== 顶部欢迎栏 ===== */}
+      <WelcomeBanner />
 
       {/* ===== 消息区域（ScrollBox） ===== */}
       <Box flexDirection="column" flexGrow={1}>
