@@ -753,15 +753,43 @@ function HighlightText({
   )
 }
 
+/** 无匹配时的提示（仿 Claude Code "No commands match \"/xxx\""） */
+const NoMatchHint = ({ input }: { input: string }) => (
+  <Box paddingX={1}>
+    <Text color={C.inactive} dim>
+      No commands match <Text color={C.suggestion}>"{input}"</Text>
+    </Text>
+  </Box>
+)
+
 const CommandSuggestionList = ({
   suggestions,
   selectedIndex,
   query,
+  input,
 }: {
   suggestions: CommandSuggestion[]
   selectedIndex: number
   query: string
+  /** 完整的输入字符串，用于无匹配时显示提示 */
+  input: string
 }) => {
+  // 无匹配且有实际查询词时 → 显示 "No commands match"
+  if (suggestions.length === 0 && isCommandInput(input) && hasCommandArgs(input) === false) {
+    const q = getCommandQuery(input)
+    if (q.length > 0) {
+      return (
+        <Box flexDirection="column">
+          {/* 分隔线 */}
+          <Box borderStyle="single" borderColor={C.hintDim} borderDimColor
+            borderLeft={false} borderRight={false} borderTop={false} />
+          <NoMatchHint input={`/${q}`} />
+        </Box>
+      )
+    }
+    return null
+  }
+
   if (suggestions.length === 0) return null
 
   return (
@@ -1018,28 +1046,32 @@ const PromptInputBar = ({
         )}
       </Box>
 
-      {/* 命令建议列表（仿 Claude Code PromptInputFooterSuggestions 双列布局） */}
-      {suggestions.length > 0 && (
-        <CommandSuggestionList suggestions={suggestions} selectedIndex={selectedSuggestion} query={commandQuery} />
+      {/* 命令建议列表 / 无匹配提示（仿 Claude Code PromptInputFooterSuggestions） */}
+      {isCommandInput(value) && (
+        <CommandSuggestionList suggestions={suggestions} selectedIndex={selectedSuggestion} query={commandQuery} input={value} />
       )}
 
       {/* 参数提示 */}
       {argumentHint && <ArgumentHint hint={argumentHint} />}
 
-      {/* 分隔线：> 提示行与提示栏之间（仅底部边框） */}
-      <Box
-        borderStyle="single"
-        borderColor={C.hintDim}
-        borderDimColor
-        borderLeft={false}
-        borderRight={false}
-        borderTop={false}
-      />
+      {/* 分隔线：> 提示行与底部区域 — 斜杠命令时由 CommandSuggestionList 自带，此处不重复绘制 */}
+      {!isCommandInput(value) && (
+        <Box
+          borderStyle="single"
+          borderColor={C.hintDim}
+          borderDimColor
+          borderLeft={false}
+          borderRight={false}
+          borderTop={false}
+        />
+      )}
 
-      {/* 提示栏：? for shortcuts · -- for agents */}
-      <Box flexDirection="row" paddingX={1} paddingBottom={1}>
-        <Text color={C.hintDim} dim>? for shortcuts {F.middot} -- for agents</Text>
-      </Box>
+      {/* 提示栏：? for shortcuts · -- for agents — 仅输入框为空时显示 */}
+      {value.length === 0 && (
+        <Box flexDirection="row" paddingX={1} paddingBottom={1}>
+          <Text color={C.hintDim} dim>? for shortcuts {F.middot} -- for agents</Text>
+        </Box>
+      )}
     </Box>
   )
 }
