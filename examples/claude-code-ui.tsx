@@ -856,17 +856,18 @@ function parseInlineMarkdown(text: string): MdSegment[] {
   return segments
 }
 
-/** 渲染 Markdown 文本为 Ink Text 组件序列 */
+/** 渲染 Markdown 文本为单行 Ink Text（内联拼接所有片段） */
 const MarkdownText = ({ text, color }: { text: string; color?: string }) => {
   const segments = parseInlineMarkdown(text)
+  // 所有片段作为 <Text> 的子元素行内拼接，保证换行宽度计算正确
   return (
-    <>
+    <Text>
       {segments.map((seg, i) => (
         <Text key={i} color={color} bold={seg.bold} italic={seg.italic} backgroundColor={seg.code ? 'rgb(60,60,60)' : undefined}>
           {seg.text}
         </Text>
       ))}
-    </>
+    </Text>
   )
 }
 
@@ -922,12 +923,14 @@ const AssistantResponse = ({
         <Box flexDirection="column">
           <Box flexDirection="row">
             <Text color={C.bullet}>{F.bullet} </Text>
-            <Text color={C.responseText}>
-              {msg.content ? (
-                <MarkdownText text={msg.content} color={C.responseText} />
-              ) : isStreaming ? '' : '(no content)'}
-              {isStreaming && <Text dim>{F.cursor}</Text>}
-            </Text>
+            <Box flexGrow={1}>
+              <Text color={C.responseText}>
+                {msg.content ? (
+                  <MarkdownText text={msg.content} color={C.responseText} />
+                ) : isStreaming ? '' : '(no content)'}
+                {isStreaming && <Text dim>{F.cursor}</Text>}
+              </Text>
+            </Box>
           </Box>
         </Box>
       )}
