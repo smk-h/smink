@@ -25,7 +25,6 @@ import {
   Box,
   Text,
   Newline,
-  Spacer,
   ScrollBox,
   useInput,
   useApp,
@@ -482,6 +481,16 @@ const ThinkingAnimation = ({ elapsedMs }: { elapsedMs: number }) => {
   )
 }
 
+// ─── 组件：块状光标（仿 Claude Code invert(' ') 反色光标）──────
+// Claude Code 使用 chalk.inverse（ANSI SGR 7 反色）渲染 invert(' ')，
+// 将空格的前景/背景色互换，产生实心块状光标效果。
+// 此处用 Ink 的 backgroundColor 模拟相同效果。
+// 注意：Claude Code 的输入光标不闪烁，始终为静态反色块。
+
+const BlockCursor = () => (
+  <Text backgroundColor={C.text} color="black"> </Text>
+)
+
 // ─── 组件：AI 回复区域（含 ⎿ 缩进） ──────────────────
 
 const AssistantResponse = ({
@@ -605,16 +614,15 @@ const PromptInputBar = ({
       />
 
       {/* ❯ 提示符 + 输入内容（独立行） */}
+      {/* 仿 Claude Code TextInput：invert(' ') 反色块状光标，始终可见 */}
       <Box flexDirection="row" paddingX={1}>
         <Text color={C.promptChar} dimColor={loading}>{`${F.pointer} `}</Text>
-        <Spacer />
         {value.length > 0 ? (
-          <Text>{value}<Text dim>{F.cursor}</Text></Text>
+          <Text>{value}<BlockCursor /></Text>
+        ) : loading ? (
+          <Text color={C.hintDim} dim>waiting for response...</Text>
         ) : (
-          <Text color={C.hintDim} dim>
-            {/* 空时不显示占位文本，保持简洁 */}
-            {loading ? 'waiting for response...' : ''}
-          </Text>
+          <BlockCursor />
         )}
       </Box>
 
