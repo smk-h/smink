@@ -73,6 +73,29 @@ type ChatMessage = {
   usage?: TokenUsage
 }
 
+// ─── Claude Code 风格符号表 ─────────────────────────
+// 统一管理所有特殊字符，参考 Claude Code 源码 figures 体系
+
+const F = {
+  /** ❯ U+276F - 输入提示符，对应 figures.pointer，Claude Code PromptInputModeIndicator 使用 */
+  pointer: '\u276F',
+
+  /** ● U+25CF - 回复正文前的实心圆点项目符号 */
+  bullet: '\u25CF',
+
+  /** ✻ U+273B - 思考/完成状态的旋转器图标，Claude Code Spinner 使用 */
+  spinner: '\u273B',
+
+  /** ∴ U+2234 - 展开思考内容前的"所以"符号，Claude 源码 ThinkingMessage 使用 */
+  therefore: '\u2234',
+
+  /** ▎U+258E - 流式输出时的光标竖线 */
+  cursor: '\u258E',
+
+  /** · U+00B7 - 中点分隔符，用于 "1s · thinking" 等场景 */
+  middot: '\u00B7',
+}
+
 // ─── Claude Code 风格色彩方案 ─────────────────────
 
 // 尽量贴近 Claude Code 终端的暗色调
@@ -86,7 +109,7 @@ const C = {
   // AI 回复正文 - 默认白色
   responseText: 'ansi:white',
 
-  // 提示符 >
+  // 提示符 ❯
   promptChar: 'ansi:white',
 
   // 缩进符号 ⎿
@@ -95,7 +118,7 @@ const C = {
   // 项目符号 ●
   bullet: 'ansi:white',
 
-  // 完成状态 ✻ — Claude 橙色
+  // 完成状态 ✻ — 灰色
   workedDim: 'ansi:blackBright',
 
   // ✻ Spinner 图标 — Claude 品牌橙 rgb(215,119,87)
@@ -201,7 +224,7 @@ async function streamChat(
 
 const UserMessageLine = ({ text }: { text: string }) => (
   <Box flexDirection="row">
-    <Text color={C.promptChar} bold>{'> '} </Text>
+    <Text color={C.promptChar} bold>{F.pointer} </Text>
     <Text color={C.userText}>{text}</Text>
   </Box>
 )
@@ -228,7 +251,7 @@ const ThoughtBlock = ({
         {/* 思考内容（灰色），∴ 本身就是图标，等同于 ● */}
         <Box flexDirection="column">
           <Text color={C.thoughtDim}>
-            <Text italic>{'\u2234 '}</Text>{reasoning}
+            <Text italic>{F.therefore} </Text>{reasoning}
           </Text>
         </Box>
 
@@ -272,7 +295,7 @@ const ThinkingAnimation = ({ elapsedMs }: { elapsedMs: number }) => {
   return (
     <Box flexDirection="row">
       <Text color={C.claude}>
-        {'\u273B '}{verb}{dots} <Text color={C.thoughtDim}>({formatDuration(elapsedMs)} {'\u00b7'} thinking)</Text>
+        {F.spinner} {verb}{dots} <Text color={C.thoughtDim}>({formatDuration(elapsedMs)} {F.middot} thinking)</Text>
       </Text>
     </Box>
   )
@@ -329,10 +352,10 @@ const AssistantResponse = ({
       {(isStreaming || isDone) && (
         <Box flexDirection="column">
           <Box flexDirection="row">
-            <Text color={C.bullet}>{'\u25CF '}</Text>
+            <Text color={C.bullet}>{F.bullet} </Text>
             <Text color={C.responseText}>
               {msg.content || (isStreaming ? '' : '(no content)')}
-              {isStreaming && <Text dim>{'\u258E'}</Text>}
+              {isStreaming && <Text dim>{F.cursor}</Text>}
             </Text>
           </Box>
         </Box>
@@ -342,7 +365,7 @@ const AssistantResponse = ({
       {isDone && (
         <Box flexDirection="row" marginTop={1}>
           <Text color={C.workedDim} dim>
-            {'\u273B '}{fixedVerb} for {formatDuration(msg.totalDurationMs ?? msg.thinkDurationMs ?? 0)}
+            {F.spinner} {fixedVerb} for {formatDuration(msg.totalDurationMs ?? msg.thinkDurationMs ?? 0)}
           </Text>
         </Box>
       )}
@@ -389,28 +412,44 @@ const PromptInputBar = ({
   tokenUsage: TokenUsage
 }) => {
   return (
-    <Box flexDirection="column" borderTop borderColor={C.hintDim} borderStyle="single">
-      {/* 输入行：> 提示符 + 内容 */}
-      <Box flexDirection="row" paddingX={1} paddingTop={0} paddingBottom={0}>
-        <Text color={C.promptChar} bold>{'>'}</Text>
-        <Spacer minWidth={1} />
+    <Box flexDirection="column">
+      {/* 分隔线：只显示顶部边框，与 Claude Code 源码中的 PermissionDialog 同一方式 */}
+      <Box
+        borderStyle="single"
+        borderColor={C.hintDim}
+        borderDimColor
+        borderLeft={false}
+        borderRight={false}
+        borderBottom={false}
+      />
+
+      {/* ❯ 提示符 + 输入内容（独立行） */}
+      <Box flexDirection="row" paddingX={1}>
+        <Text color={C.promptChar} dimColor={loading}>{`${F.pointer} `}</Text>
+        <Spacer />
         {value.length > 0 ? (
-          <Text>{value}<Text dim>{'\u258E'}</Text></Text>
+          <Text>{value}<Text dim>{F.cursor}</Text></Text>
         ) : (
           <Text color={C.hintDim} dim>
+            {/* 空时不显示占位文本，保持简洁 */}
             {loading ? 'waiting for response...' : ''}
           </Text>
         )}
       </Box>
 
-      {/* 底部提示栏：? for shortcuts · -- for agents */}
-      <Box flexDirection="row" paddingX={1} justifyContent="space-between">
-        <Text color={C.hintDim} dim>? for shortcuts {'\u00b7'} -- for agents</Text>
-        <Text color={C.hintDim} dim>
-          {tokenUsage.totalTokens > 0
-            ? `\u2193 ${tokenUsage.totalTokens} tokens`
-            : '\u26aa max / effort'}
-        </Text>
+      {/* 分隔线：> 提示行与提示栏之间（仅底部边框） */}
+      <Box
+        borderStyle="single"
+        borderColor={C.hintDim}
+        borderDimColor
+        borderLeft={false}
+        borderRight={false}
+        borderTop={false}
+      />
+
+      {/* 提示栏：? for shortcuts · -- for agents */}
+      <Box flexDirection="row" paddingX={1} paddingBottom={1}>
+        <Text color={C.hintDim} dim>? for shortcuts {F.middot} -- for agents</Text>
       </Box>
     </Box>
   )
