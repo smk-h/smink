@@ -74,6 +74,21 @@ type ChatMessage = {
   usage?: TokenUsage
 }
 
+// ─── 斜杠命令类型（仿 Claude Code Command 联合类型）──────
+
+type SlashCommand = {
+  name: string                // 命令名（不含 /）
+  aliases?: string[]          // 别名列表
+  description: string        // 命令描述
+  argumentHint?: string      // 参数占位提示
+  prompt: string              // 发送给 LLM 的提示词
+}
+
+type CommandSuggestion = {
+  command: SlashCommand
+  matchedAlias?: string       // 匹配到的别名
+}
+
 // ─── Claude Code 风格符号表 ─────────────────────────
 // 统一管理所有特殊字符，参考 Claude Code 源码 figures 体系
 
@@ -334,6 +349,177 @@ function formatTime(date: Date = new Date()): string {
 
 const MODEL_NAME = 'deepseek-v4-pro'
 
+// ─── 斜杠命令注册表（仿 Claude Code COMMANDS 注册表）─────
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    name: 'hello',
+    description: 'Say hello to the assistant',
+    prompt: '你好',
+  },
+  {
+    name: 'sky',
+    description: 'Ask why the sky is blue',
+    prompt: '天空为什么是蓝色的',
+  },
+  {
+    name: 'skills',
+    aliases: ['s'],
+    description: 'Ask what the assistant can do',
+    prompt: '你可以做什么',
+  },
+]
+
+// ─── 斜杠命令匹配引擎（仿 Claude Code commandSuggestions）───
+
+/** 检测输入是否为斜杠命令 */
+function isCommandInput(input: string): boolean {
+  return input.startsWith('/')
+}
+
+/** 从输入中提取命令查询词（去除 / 和参数） */
+function getCommandQuery(input: string): string {
+  const spaceIndex = input.indexOf(' ')
+  if (spaceIndex === -1) return input.slice(1).toLowerCase()
+  return input.slice(1, spaceIndex).toLowerCase()
+}
+
+/** 检测输入中是否已有参数 */
+function hasCommandArgs(input: string): boolean {
+  if (!isCommandInput(input)) return false
+  const spaceIndex = input.indexOf(' ')
+  if (spaceIndex === -1) return false
+  // 只有空格没有实际内容不算有参数
+  return input.slice(spaceIndex + 1).trim().length > 0
+}
+
+/** 精确匹配 + 别名匹配 + 前缀模糊匹配，返回排序后的建议列表 */
+function generateCommandSuggestions(input: string): CommandSuggestion[] {
+  if (!isCommandInput(input)) return []
+  // 有实际参数时不展示建议
+  if (hasCommandArgs(input)) return []
+
+  const query = input.slice(1).toLowerCase().trim()
+
+  // 仅输入 / 时展示全部命令
+  if (query === '') {
+    return SLASH_COMMANDS.map(cmd => ({ command: cmd }))
+  }
+
+  const results: CommandSuggestion[] = []
+  const seen = new Set<string>()
+
+  // 优先级 1：精确名称匹配
+  for (const cmd of SLASH_COMMANDS) {
+    if (cmd.name.toLowerCase() === query && !seen.has(cmd.name)) {
+      seen.add(cmd.name)
+      results.push({ command: cmd })
+    }
+  }
+
+  // 优先级 2：精确别名匹配
+  for (const cmd of SLASH_COMMANDS) {
+    if (seen.has(cmd.name)) continue
+    const matchedAlias = cmd.aliases?.find(a => a.toLowerCase() === query)
+    if (matchedAlias) {
+      seen.add(cmd.name)
+      results.push({ command: cmd, matchedAlias })
+    }
+  }
+
+  // 优先级 3：名称前缀匹配
+  for (const cmd of SLASH_COMMANDS) {
+    if (seen.has(cmd.name)) continue
+    if (cmd.name.toLowerCase().startsWith(query)) {
+      seen.add(cmd.name)
+      results.push({ command: cmd })
+    }
+  }
+
+  // 优先级 4：别名前缀匹配
+  for (const cmd of SLASH_COMMANDS) {
+    if (seen.has(cmd.name)) continue
+    const matchedAlias = cmd.aliases?.find(a => a.toLowerCase().startsWith(query))
+    if (matchedAlias) {
+      seen.add(cmd.name)
+      results.push({ command: cmd, matchedAlias })
+    }
+  }
+
+  // 优先级 5：名称包含匹配（简单模糊）
+  for (const cmd of SLASH_COMMANDS) {
+    if (seen.has(cmd.name)) continue
+    if (cmd.name.toLowerCase().includes(query)) {
+      seen.add(cmd.name)
+      results.push({ command: cmd })
+    }
+  }
+
+  // 优先级 6：描述包含匹配
+  for (const cmd of SLASH_COMMANDS) {
+    if (seen.has(cmd.name)) continue
+    if (cmd.description.toLowerCase().includes(query)) {
+      seen.add(cmd.name)
+      results.push({ command: cmd })
+    }
+  }
+
+  return results
+}
+
+/** 获取最佳匹配用于 Ghost Text 内联补全 */
+function getBestCommandMatch(
+  partialCommand: string,
+): { suffix: string; fullCommand: string } | null {
+  if (!partialCommand) return null
+  const query = partialCommand.toLowerCase()
+
+  // 先查名称前缀
+  for (const cmd of SLASH_COMMANDS) {
+    if (cmd.name.toLowerCase().startsWith(query)) {
+      const suffix = cmd.name.slice(partialCommand.length)
+      if (suffix) return { suffix, fullCommand: cmd.name }
+    }
+  }
+
+  // 再查别名前缀（Ghost Text 不展示别名，补全为真实名称）
+  for (const cmd of SLASH_COMMANDS) {
+    const matchedAlias = cmd.aliases?.find(a => a.toLowerCase().startsWith(query))
+    if (matchedAlias) {
+      // 补全为真实命令名而非别名
+      const suffix = cmd.name.slice(partialCommand.length)
+      if (suffix) return { suffix, fullCommand: cmd.name }
+      return null
+    }
+  }
+
+  return null
+}
+
+/** 解析斜杠命令，返回命令对象和参数 */
+function parseSlashCommand(inputStr: string): { command: SlashCommand; args: string } | null {
+  const trimmed = inputStr.trim()
+  if (!trimmed.startsWith('/')) return null
+
+  const withoutSlash = trimmed.slice(1)
+  const spaceIndex = withoutSlash.indexOf(' ')
+  const commandName = spaceIndex === -1 ? withoutSlash : withoutSlash.slice(0, spaceIndex)
+  const args = spaceIndex === -1 ? '' : withoutSlash.slice(spaceIndex + 1)
+  const query = commandName.toLowerCase()
+
+  // 精确名称匹配
+  const exactMatch = SLASH_COMMANDS.find(cmd => cmd.name.toLowerCase() === query)
+  if (exactMatch) return { command: exactMatch, args }
+
+  // 别名匹配
+  const aliasMatch = SLASH_COMMANDS.find(cmd =>
+    cmd.aliases?.some(a => a.toLowerCase() === query),
+  )
+  if (aliasMatch) return { command: aliasMatch, args }
+
+  return null
+}
+
 /** Claude Code 风格的完成动词 */
 const TURN_VERBS = [
   'Worked', 'Baked', 'Brewed', 'Churned', 'Cogitated',
@@ -491,6 +677,199 @@ const BlockCursor = () => (
   <Text backgroundColor={C.text} color="black"> </Text>
 )
 
+// ─── 组件：命令建议列表（仿 Claude Code PromptInputFooterSuggestions 双列布局）──
+
+const MAX_VISIBLE_SUGGESTIONS = 5
+const COMMAND_COL_WIDTH = 28 // 命令名列固定宽度，保证描述左对齐
+/** 匹配字符高亮色 */
+const MATCH_HIGHLIGHT_COLOR = C.suggestion // 浅蓝紫，与选中色一致
+
+/** 截断文本到指定显示宽度 */
+function truncateToWidth(text: string, maxWidth: number): string {
+  let width = 0
+  for (let i = 0; i < text.length; i++) {
+    width += stringWidth(text[i])
+    if (width > maxWidth) {
+      return text.slice(0, i).trimEnd() + '...'
+    }
+  }
+  return text
+}
+
+/**
+ * 高亮文本中匹配查询词的字符
+ * 将 text 中所有匹配 query 的子串用指定颜色+粗体渲染
+ */
+function HighlightText({
+  text,
+  query,
+  color,
+  dim,
+  bold,
+}: {
+  text: string
+  query: string
+  color?: string
+  dim?: boolean
+  bold?: boolean
+}) {
+  if (!query) {
+    return <Text color={color} dim={dim} bold={bold}>{text}</Text>
+  }
+
+  const lowerText = text.toLowerCase()
+  const lowerQuery = query.toLowerCase()
+  const parts: Array<{ text: string; isMatch: boolean }> = []
+  let searchFrom = 0
+
+  while (searchFrom < lowerText.length) {
+    const idx = lowerText.indexOf(lowerQuery, searchFrom)
+    if (idx === -1) {
+      parts.push({ text: text.slice(searchFrom), isMatch: false })
+      break
+    }
+    // 前面的非匹配部分
+    if (idx > searchFrom) {
+      parts.push({ text: text.slice(searchFrom, idx), isMatch: false })
+    }
+    // 匹配部分
+    parts.push({ text: text.slice(idx, idx + query.length), isMatch: true })
+    searchFrom = idx + query.length
+  }
+
+  return (
+    <>
+      {parts.map((part, i) => (
+        <Text
+          key={i}
+          color={part.isMatch ? MATCH_HIGHLIGHT_COLOR : color}
+          bold={part.isMatch ? true : bold}
+          dim={!part.isMatch && dim}
+        >
+          {part.text}
+        </Text>
+      ))}
+    </>
+  )
+}
+
+const CommandSuggestionList = ({
+  suggestions,
+  selectedIndex,
+  query,
+}: {
+  suggestions: CommandSuggestion[]
+  selectedIndex: number
+  query: string
+}) => {
+  if (suggestions.length === 0) return null
+
+  return (
+    <Box flexDirection="column" paddingX={1}>
+      {/* 列头分隔线 */}
+      <Box borderStyle="single" borderColor={C.hintDim} borderDimColor
+        borderLeft={false} borderRight={false} borderTop={false} />
+      {suggestions.slice(0, MAX_VISIBLE_SUGGESTIONS).map((suggestion, index) => {
+        const cmd = suggestion.command
+        const isSelected = index === selectedIndex
+        const aliasText = suggestion.matchedAlias ? ` (${suggestion.matchedAlias})` : ''
+        const displayName = `/${cmd.name}${aliasText}`
+        const displayDesc = cmd.description
+          ? truncateToWidth(cmd.description, Math.max(30, process.stdout.columns ?? 80) - COMMAND_COL_WIDTH - 6)
+          : ''
+
+        // 选中行：整行统一用 suggestion 色高亮；非选中行：命令名列用默认色，描述用 subtle
+        const rowColor = isSelected ? C.suggestion : undefined
+        const descColor = isSelected ? C.suggestion : C.subtle
+
+        return (
+          <Box key={cmd.name} flexDirection="row">
+            {/* 左列：命令名（固定宽度）— 选中时整行高亮 */}
+            <Box width={COMMAND_COL_WIDTH}>
+              <HighlightText
+                text={displayName}
+                query={query}
+                color={rowColor}
+                bold={isSelected}
+                dim={!isSelected}
+              />
+            </Box>
+            {/* 右列：描述 — 选中时同样高亮，与左列风格一致 */}
+            {displayDesc && (
+              <HighlightText
+                text={`  ${displayDesc}`}
+                query={query}
+                color={descColor}
+                bold={isSelected}
+                dim={!isSelected}
+              />
+            )}
+          </Box>
+        )
+      })}
+    </Box>
+  )
+}
+
+// ─── 组件：参数提示（仿 Claude Code commandArgumentHint）──
+
+const ArgumentHint = ({ hint }: { hint: string }) => (
+  <Box paddingX={1}>
+    <Text color={C.inactive} dim>{hint}</Text>
+  </Box>
+)
+
+// ─── 简易 Markdown 渲染器（将 LLM 返回的 Markdown 转为 Ink Text 组件）────
+// 支持：**bold**、*italic*、`code`、行内渲染
+
+type MdSegment = { text: string; bold?: boolean; italic?: boolean; code?: boolean }
+
+/** 将含 markdown 的纯文本拆分为分段，每段带样式标记 */
+function parseInlineMarkdown(text: string): MdSegment[] {
+  const segments: MdSegment[] = []
+  // 正则：匹配 **bold**、*italic*、`code`（非贪婪，按优先级）
+  const regex = /(\*\*(.+?)\*\*)|(\*(.+?)\*)|(`(.+?)`)/gs
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = regex.exec(text)) !== null) {
+    // 前面的普通文本
+    if (match.index > lastIndex) {
+      segments.push({ text: text.slice(lastIndex, match.index) })
+    }
+    if (match[1]) {
+      // **bold**
+      segments.push({ text: match[2], bold: true })
+    } else if (match[3]) {
+      // *italic*
+      segments.push({ text: match[4], italic: true })
+    } else if (match[5]) {
+      // `code`
+      segments.push({ text: match[6], code: true })
+    }
+    lastIndex = regex.lastIndex
+  }
+  // 尾部剩余文本
+  if (lastIndex < text.length) {
+    segments.push({ text: text.slice(lastIndex) })
+  }
+  return segments
+}
+
+/** 渲染 Markdown 文本为 Ink Text 组件序列 */
+const MarkdownText = ({ text, color }: { text: string; color?: string }) => {
+  const segments = parseInlineMarkdown(text)
+  return (
+    <>
+      {segments.map((seg, i) => (
+        <Text key={i} color={color} bold={seg.bold} italic={seg.italic} backgroundColor={seg.code ? 'rgb(60,60,60)' : undefined}>
+          {seg.text}
+        </Text>
+      ))}
+    </>
+  )
+}
+
 // ─── 组件：AI 回复区域（含 ⎿ 缩进） ──────────────────
 
 const AssistantResponse = ({
@@ -544,7 +923,9 @@ const AssistantResponse = ({
           <Box flexDirection="row">
             <Text color={C.bullet}>{F.bullet} </Text>
             <Text color={C.responseText}>
-              {msg.content || (isStreaming ? '' : '(no content)')}
+              {msg.content ? (
+                <MarkdownText text={msg.content} color={C.responseText} />
+              ) : isStreaming ? '' : '(no content)'}
               {isStreaming && <Text dim>{F.cursor}</Text>}
             </Text>
           </Box>
@@ -596,10 +977,18 @@ const PromptInputBar = ({
   value,
   loading,
   tokenUsage,
+  suggestions,
+  selectedSuggestion,
+  argumentHint,
+  commandQuery,
 }: {
   value: string
   loading: boolean
   tokenUsage: TokenUsage
+  suggestions: CommandSuggestion[]
+  selectedSuggestion: number
+  argumentHint?: string
+  commandQuery: string
 }) => {
   return (
     <Box flexDirection="column">
@@ -625,6 +1014,14 @@ const PromptInputBar = ({
           <BlockCursor />
         )}
       </Box>
+
+      {/* 命令建议列表（仿 Claude Code PromptInputFooterSuggestions 双列布局） */}
+      {suggestions.length > 0 && (
+        <CommandSuggestionList suggestions={suggestions} selectedIndex={selectedSuggestion} query={commandQuery} />
+      )}
+
+      {/* 参数提示 */}
+      {argumentHint && <ArgumentHint hint={argumentHint} />}
 
       {/* 分隔线：> 提示行与提示栏之间（仅底部边框） */}
       <Box
@@ -661,6 +1058,68 @@ const App = () => {
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
   const nextId = useRef(1)
   const scrollRef = useRef<any>(null)
+
+  // ─── 斜杠命令 UI 状态 ───
+  const [commandSuggestions, setCommandSuggestions] = useState<CommandSuggestion[]>([])
+  const [selectedSuggestion, setSelectedSuggestion] = useState(-1)
+  const [argumentHint, setArgumentHint] = useState<string | undefined>(undefined)
+
+  // ─── 输入变化时更新建议 ───
+  const updateSuggestions = useCallback((value: string) => {
+    if (!isCommandInput(value) || hasCommandArgs(value)) {
+      setCommandSuggestions([])
+      setSelectedSuggestion(-1)
+      setArgumentHint(undefined)
+      return
+    }
+
+    // 更新建议列表
+    const suggestions = generateCommandSuggestions(value)
+    setCommandSuggestions(suggestions)
+    setSelectedSuggestion(suggestions.length > 0 ? 0 : -1)
+
+    // 更新参数提示：命令名后恰好有一个空格时
+    const spaceIndex = value.indexOf(' ')
+    const hasTrailingSpace = spaceIndex !== -1 && value.length === spaceIndex + 1
+    if (hasTrailingSpace) {
+      const cmdName = value.slice(1, spaceIndex).toLowerCase()
+      const cmd = SLASH_COMMANDS.find(c => c.name.toLowerCase() === cmdName)
+        ?? SLASH_COMMANDS.find(c => c.aliases?.some(a => a.toLowerCase() === cmdName))
+      if (cmd?.argumentHint) {
+        setArgumentHint(cmd.argumentHint)
+      } else {
+        setArgumentHint(undefined)
+      }
+    } else {
+      setArgumentHint(undefined)
+    }
+  }, [])
+
+  // ─── 清除建议 ───
+  const clearSuggestions = useCallback(() => {
+    setCommandSuggestions([])
+    setSelectedSuggestion(-1)
+    setArgumentHint(undefined)
+  }, [])
+
+  // ─── 应用命令补全（Tab 或 Enter 选中时） ───
+  const applyCommandCompletion = useCallback((
+    suggestion: CommandSuggestion,
+    shouldExecute: boolean,
+  ) => {
+    const cmdName = suggestion.command.name
+    const newInput = `/${cmdName} `
+    setInput(newInput)
+    clearSuggestions()
+
+    // 如果需要执行且命令无参数 → 直接提交
+    if (shouldExecute) {
+      const parsed = parseSlashCommand(newInput)
+      if (parsed) {
+        sendMessage(parsed.command.prompt)
+      }
+    }
+  }, [clearSuggestions])
 
   // 切换某条消息的思考内容展开状态
   const toggleExpand = useCallback((msgId: number) => {
@@ -703,6 +1162,7 @@ const App = () => {
     setMessages(prev => [...prev, userMsg, assistantMsg])
     setInput('')
     setLoading(true)
+    clearSuggestions()
 
     const history = [...messages, userMsg].map(m => ({
       role: m.role,
@@ -788,7 +1248,7 @@ const App = () => {
         setLoading(false)
       },
     )
-  }, [messages, loading])
+  }, [messages, loading, clearSuggestions])
 
   // 键盘输入处理
   useInput((inputKey, key) => {
@@ -809,21 +1269,88 @@ const App = () => {
       return
     }
 
-    if (key.return) {
-      if (input.trim() && !loading) {
-        sendMessage(input)
+    // ─── Tab 键补全（仿 Claude Code useTypeahead handleTab） ───
+    if (key.tab) {
+      // 有建议列表时：应用选中的建议（补全但不执行）
+      if (commandSuggestions.length > 0) {
+        const idx = selectedSuggestion === -1 ? 0 : selectedSuggestion
+        const suggestion = commandSuggestions[idx]
+        if (suggestion) {
+          applyCommandCompletion(suggestion, false)
+        }
+        return
       }
+
+      return
+    }
+
+    // ─── 上下键导航建议列表 ───
+    if (key.upArrow) {
+      if (commandSuggestions.length > 0) {
+        setSelectedSuggestion(prev =>
+          prev <= 0 ? commandSuggestions.length - 1 : prev - 1,
+        )
+        return
+      }
+    }
+
+    if (key.downArrow) {
+      if (commandSuggestions.length > 0) {
+        setSelectedSuggestion(prev =>
+          prev >= commandSuggestions.length - 1 ? 0 : prev + 1,
+        )
+        return
+      }
+    }
+
+    // ─── Enter 键执行 ───
+    if (key.return) {
+      if (!input.trim() || loading) return
+
+      // 有建议选中时：应用并执行
+      if (commandSuggestions.length > 0 && selectedSuggestion >= 0) {
+        const suggestion = commandSuggestions[selectedSuggestion]
+        if (suggestion) {
+          applyCommandCompletion(suggestion, true)
+          return
+        }
+      }
+
+      // 斜杠命令：解析并提取 prompt
+      if (isCommandInput(input)) {
+        const parsed = parseSlashCommand(input)
+        if (parsed) {
+          sendMessage(parsed.command.prompt)
+        } else {
+          // 未知命令 → 当作普通文本发送
+          sendMessage(input)
+        }
+        return
+      }
+
+      // 普通文本
+      sendMessage(input)
       return
     }
 
     if (key.backspace || key.delete) {
-      setInput(prev => prev.slice(0, -1))
+      setInput(prev => {
+        const newVal = prev.slice(0, -1)
+        // 退格后更新建议
+        updateSuggestions(newVal)
+        return newVal
+      })
       return
     }
 
     // 普通字符
     if (inputKey && !key.ctrl && !key.meta && !key.return) {
-      setInput(prev => prev + inputKey)
+      setInput(prev => {
+        const newVal = prev + inputKey
+        // 输入后更新建议
+        updateSuggestions(newVal)
+        return newVal
+      })
     }
   })
 
@@ -855,7 +1382,15 @@ const App = () => {
       </Box>
 
       {/* ===== 底部输入栏（固定） ===== */}
-      <PromptInputBar value={input} loading={loading} tokenUsage={tokenUsage} />
+      <PromptInputBar
+        value={input}
+        loading={loading}
+        tokenUsage={tokenUsage}
+        suggestions={commandSuggestions}
+        selectedSuggestion={selectedSuggestion}
+        argumentHint={argumentHint}
+        commandQuery={isCommandInput(input) ? getCommandQuery(input) : ''}
+      />
     </Box>
   )
 }
