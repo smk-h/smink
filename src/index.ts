@@ -99,6 +99,20 @@ export {
   type FrameCause,
   type ScrollGeometryNote,
 } from './ink/geometry-trace.js'
+export {
+  RAIL_MIN_TERMINAL_WIDTH,
+  RAIL_MIN_TURNS,
+  RAIL_WIDTH,
+  clipPreview,
+  computeRailGeometry,
+  railEligible,
+  railHit,
+  wrapPreviewLines,
+  type RailGeometry,
+  type RailHit,
+  type TimelineSnapshot,
+  type TimelineTurn,
+} from './ink/timeline-rail.js'
 export { colorize } from './ink/colorize.js'
 
 // Re-export contexts (all use default exports)
