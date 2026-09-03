@@ -4,6 +4,7 @@ import { markScrollActivity } from '../../bootstrap/state.js';
 import type { DOMElement } from '../dom.js';
 import { markDirty, scheduleRenderFrom } from '../dom.js';
 import { noteFrameCause } from '../geometry-trace.js';
+import type { WheelEvent } from '../events/wheel-event.js';
 import { markCommitStart } from '../reconciler.js';
 import type { Styles } from '../styles.js';
 import Box from './Box.js';
@@ -67,6 +68,14 @@ export type ScrollBoxProps = Except<Styles, 'textWrap' | 'overflow' | 'overflowX
    * grows. Unset manually via scrollTo/scrollBy to break the stickiness.
    */
   stickyScroll?: boolean;
+  /**
+   * Observes wheel input routed to this box. The SCROLL ITSELF IS ALREADY
+   * APPLIED by the time this fires — the handler is for reacting (cancel a
+   * pending auto-scroll, show a "jump to bottom" affordance), not for
+   * performing the scroll. Call `event.stopImmediatePropagation()` to keep
+   * ancestor onWheel handlers from firing too.
+   */
+  onWheel?: (event: WheelEvent) => void;
 };
 
 /**
@@ -83,6 +92,7 @@ function ScrollBox({
   children,
   ref,
   stickyScroll,
+  onWheel,
   ...style
 }: PropsWithChildren<ScrollBoxProps>): React.ReactNode {
   const domRef = useRef<DOMElement>(null);
@@ -218,10 +228,30 @@ function ScrollBox({
   // stickyScroll is passed as a DOM attribute (via ink-box directly) so it's
   // available on the first render — ref callbacks fire after the initial
   // commit, which is too late for the first frame.
+  // Default wheel behavior: apply the delta, then let the caller react.
+  // Routing guarantees this only fires when the pointer is over the deepest
+  // scroll container, so nested boxes don't all scroll at once. Doing the
+  // scrollBy here — rather than requiring every call site to wire it — is
+  // what makes wheel work out of the box.
+  const handleWheel = (event: WheelEvent): void => {
+    const el = domRef.current;
+    if (el) {
+      el.stickyScroll = false;
+      // Wheel input cancels any in-flight anchor seek — user override.
+      el.scrollAnchor = undefined;
+      // Accumulate rather than set: the renderer drains at a capped rate so
+      // fast flicks show intermediate frames, and scroll-up followed by
+      // scroll-down naturally cancels.
+      el.pendingScrollDelta = (el.pendingScrollDelta ?? 0) + Math.floor(event.deltaY);
+      scrollMutated(el);
+    }
+    onWheel?.(event);
+  };
+
   return <ink-box ref={el => {
     domRef.current = el;
     if (el) el.scrollTop ??= 0;
-  }} style={{
+  }} onWheel={handleWheel} style={{
     flexWrap: 'nowrap',
     flexDirection: style.flexDirection ?? 'row',
     flexGrow: style.flexGrow ?? 0,

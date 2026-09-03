@@ -99,6 +99,10 @@ export {
   type FrameCause,
   type ScrollGeometryNote,
 } from './ink/geometry-trace.js'
+export { WheelEvent } from './ink/events/wheel-event.js'
+export { DragEvent, type DragEventType } from './ink/events/drag-event.js'
+export { ContextMenuEvent } from './ink/events/context-menu-event.js'
+export { PointerEvent, type PointerAction } from './ink/events/pointer-event.js'
 export {
   RAIL_MIN_TERMINAL_WIDTH,
   RAIL_MIN_TURNS,
