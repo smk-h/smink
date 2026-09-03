@@ -1,4 +1,5 @@
 import type { DOMElement } from './dom.js'
+import type { Color } from './styles.js'
 import type { Rectangle } from './layout/geometry.js'
 
 /**
@@ -6,6 +7,10 @@ import type { Rectangle } from './layout/geometry.js'
  * `top` is the yoga-local getComputedTop() — stored so ScrollBox viewport
  * culling can skip yoga reads for clean children whose position hasn't
  * shifted (O(dirty) instead of O(mounted) first-pass).
+ *
+ * `bg` is the node's EFFECTIVE background recorded at the previous render.
+ * Comparing against it detects background-only changes the dirty flag
+ * misses (see bgChanged in render-node-to-output).
  */
 export type CachedLayout = {
   x: number
@@ -13,6 +18,7 @@ export type CachedLayout = {
   width: number
   height: number
   top?: number
+  bg?: Color
 }
 
 export const nodeCache = new WeakMap<DOMElement, CachedLayout>()

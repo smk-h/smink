@@ -453,6 +453,18 @@ function renderNodeToOutput(
     // Check if we can skip this subtree (clean node with unchanged layout).
     // Blit cells from previous screen instead of re-rendering.
     const cached = nodeCache.get(node)
+    // The node's EFFECTIVE background = its own + the inherited one. When it
+    // changed since the last frame (hover on/off toggles a row's
+    // backgroundColor, a parent's bg swap changes every child's inherited
+    // value), prevScreen still holds the OLD background — a clean child
+    // blitting it would resurrect the stale color (stuck hover highlights:
+    // the row's fill is skipped once the bg is removed, its clean children
+    // then blit the previous bg'd cells, the frame equals prevScreen, the
+    // diff finds nothing, and the highlight never clears). Compare against
+    // the value recorded at the previous render and refuse the blit when it
+    // moved.
+    const effectiveBg = node.style.backgroundColor ?? inheritedBackgroundColor
+    const bgChanged = cached?.bg !== effectiveBg
     if (
       !node.dirty &&
       !skipSelfBlit &&
@@ -462,6 +474,7 @@ function renderNodeToOutput(
       cached.y === y &&
       cached.width === width &&
       cached.height === height &&
+      !bgChanged &&
       prevScreen
     ) {
       const fx = Math.floor(x)
@@ -1213,7 +1226,14 @@ function renderNodeToOutput(
           // on the assumption that plain-space fill + unchanged children =
           // valid composite, but children CAN reposition (ScrollBox remeasure
           // on re-render → /permissions body blanked on Down arrow, #25436).
-          ownBackgroundColor || node.style.opaque ? undefined : prevScreen,
+          // bgChanged (effective background moved, e.g. a hover highlight
+          // removed) must disable child blit for the same reason: the old
+          // fill lives in prevScreen and the children's blits would
+          // resurrect it — the frame then equals prevScreen and the diff
+          // never clears the stale highlight.
+          ownBackgroundColor || node.style.opaque || bgChanged
+            ? undefined
+            : prevScreen,
           boxBackgroundColor,
         )
       }
@@ -1239,7 +1259,7 @@ function renderNodeToOutput(
     }
 
     // Cache layout bounds for dirty tracking
-    const rect = { x, y, width, height, top: yogaTop }
+    const rect = { x, y, width, height, top: yogaTop, bg: effectiveBg }
     nodeCache.set(node, rect)
     if (node.style.position === 'absolute') {
       absoluteRectsCur.push(rect)

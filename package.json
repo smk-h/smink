@@ -28,6 +28,7 @@
     "test:terminal-size": "npx tsx examples/terminal-size.tsx",
     "test:copy-on-select": "npx tsx examples/copy-on-select.tsx",
     "test:overflow-guard": "npx tsx examples/update-overflow-guard.tsx",
+    "test:bg-changed": "npx tsx examples/bg-changed.tsx",
     "test:input-suppression": "npx tsx examples/input-suppression.tsx",
     "test:geometry-trace": "npx tsx examples/geometry-trace.tsx",
     "test:timeline-rail": "npx tsx examples/timeline-rail.tsx",
