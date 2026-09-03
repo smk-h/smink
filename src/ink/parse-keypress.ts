@@ -248,6 +248,15 @@ export function parseMultipleKeypresses(
         if (response) {
           keys.push({ kind: 'response', sequence: token.value, response })
         } else {
+          // Wheel is checked before clicks: a wheel packet carries the
+          // 0x40 bit, which parseMouseEvent deliberately rejects, but it
+          // also carries coordinates we need to route to the scroll
+          // container under the pointer. The packet is STILL emitted as a
+          // ParsedKey below so the keybinding system is unaffected.
+          const wheel = parseWheelEvent(token.value)
+          if (wheel) {
+            keys.push(wheel)
+          }
           const mouse = parseMouseEvent(token.value)
           if (mouse) {
             keys.push(mouse)
@@ -582,9 +591,38 @@ export type ParsedMouse = {
   sequence: string
 }
 
+/**
+ * SGR/X10 mouse wheel event with coordinates.
+ *
+ * Wheel is emitted separately from ParsedMouse because it carries a scroll
+ * delta rather than a press/release, and because routing needs the pointer
+ * position to find the deepest scroll container under the cursor. It is
+ * still ALSO reported as a ParsedKey ('wheelup'/'wheeldown') so the
+ * keybinding system keeps working unchanged.
+ */
+export type ParsedWheel = {
+  kind: 'wheel'
+  /** Rows to scroll: negative = up, positive = down. */
+  deltaY: number
+  /** Columns to scroll (only horizontal wheel protocols set this). */
+  deltaX: number
+  /** Raw SGR button code (bit 6 = wheel, low bits = direction + modifiers). */
+  button: number
+  /** 1-indexed column (from terminal) */
+  col: number
+  /** 1-indexed row (from terminal) */
+  row: number
+  sequence: string
+}
+
 /** Everything that can come out of the input parser: a user keypress/paste,
- *  a mouse click/drag event, or a terminal response to a query we sent. */
-export type ParsedInput = ParsedKey | ParsedMouse | ParsedResponse
+ *  a mouse click/drag/wheel event, or a terminal response to a query we
+ *  sent. */
+export type ParsedInput =
+  | ParsedKey
+  | ParsedMouse
+  | ParsedWheel
+  | ParsedResponse
 
 /**
  * Parse an SGR mouse event sequence into a ParsedMouse, or null if not a
@@ -607,6 +645,47 @@ function parseMouseEvent(s: string): ParsedMouse | null {
     sequence: s,
   }
 }
+
+/**
+ * Parse an SGR wheel event into a ParsedWheel, or null if not a wheel.
+ *
+ * Wheel packets carry bit 0x40; the low two bits select the axis and
+ * direction (0 = up, 1 = down, 2 = left, 3 = right when bit 0x80 is set
+ * for horizontal wheels in some terminals). Coordinates are included so
+ * routing can hit-test the deepest scroll container under the pointer.
+ *
+ * Modifiers arrive on the same button byte (0x04 shift / 0x08 alt / 0x10
+ * ctrl) and are left in place for handlers to read.
+ */
+function parseWheelEvent(s: string): ParsedWheel | null {
+  const match = SGR_MOUSE_RE.exec(s)
+  if (!match) return null
+  const button = parseInt(match[1]!, 10)
+  if ((button & 0x40) === 0) return null
+
+  const axis = button & 0x03
+  // 0 = up / 1 = down on the vertical axis; 2 = left / 3 = right when a
+  // terminal reports a horizontal wheel (bit 0x80 marks the extra axis).
+  const horizontal = (button & 0x80) !== 0 && axis >= 2
+  const negative = axis === 0 || axis === 2
+
+  return {
+    kind: 'wheel',
+    deltaY: horizontal ? 0 : negative ? -SCROLL_LINES_PER_WHEEL_NOTCH : SCROLL_LINES_PER_WHEEL_NOTCH,
+    deltaX: horizontal
+      ? negative
+        ? -1
+        : 1
+      : 0,
+    button,
+    col: parseInt(match[2]!, 10),
+    row: parseInt(match[3]!, 10),
+    sequence: s,
+  }
+}
+
+/** Rows scrolled per wheel notch. Matched to chat-scroll.tsx. */
+const SCROLL_LINES_PER_WHEEL_NOTCH = 4
 
 function parseKeypress(s: string = ''): ParsedKey {
   let parts
