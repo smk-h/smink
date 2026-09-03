@@ -24,6 +24,9 @@ import ErrorOverview from './ErrorOverview.js';
 import StdinContext from './StdinContext.js';
 import { TerminalFocusProvider } from './TerminalFocusContext.js';
 import { TerminalSizeContext } from './TerminalSizeContext.js';
+import type { DOMElement } from '../dom.js';
+import { dispatchDragEvent, findDragTarget } from '../hit-test.js';
+import { type ParsedWheel } from '../parse-keypress.js';
 
 // Platforms that support Unix-style process suspension (SIGSTOP/SIGCONT)
 const SUPPORTS_SUSPEND = process.platform !== 'win32';
@@ -73,6 +76,22 @@ type Props = {
   // exact cell; word/line mode snaps to word/line boundaries. Needs
   // screen-buffer access (word boundaries) so lives on Ink, not here.
   readonly onSelectionDrag: (col: number, row: number) => void;
+  // Dispatch a wheel event at (col, row) — routes to the deepest scroll
+  // container under the pointer, then bubbles onWheel up the ancestor
+  // chain. Independent of the mouse-clicks toggle so the transcript stays
+  // scrollable where click handling is suppressed.
+  readonly onWheelAt: (
+    col: number,
+    row: number,
+    deltaY: number,
+    deltaX: number,
+    button: number,
+  ) => boolean;
+  // Dispatch a context-menu event on right-button press. Bubbles
+  // onContextMenu from the deepest hit node up through parentNode.
+  readonly onContextMenuAt: (col: number, row: number, button: number) => boolean;
+  // The rendered root node, used for hit-testing drag targets on press.
+  readonly rootNode: DOMElement;
   // Called when stdin data arrives after a >STDIN_RESUME_GAP_MS gap.
   // Ink re-asserts terminal modes: extended key reporting, and (when in
   // fullscreen) re-enters alt-screen + mouse tracking. Idempotent on the
@@ -142,6 +161,17 @@ export default class App extends PureComponent<Props, State> {
   // repeat events (drag-then-release at same cell, etc.).
   lastHoverCol = -1;
   lastHoverRow = -1;
+
+  // Component-level drag session state. A session opens on an unmodified
+  // left press over a node whose ancestor chain has an onDragStart handler,
+  // but stays DORMANT until the first motion — matching DOM dragstart-on-
+  // first-move. The target is captured at press so motion keeps routing to
+  // it after the pointer leaves its rect (element-capture semantics).
+  dragTarget: DOMElement | null = null;
+  dragStartCol = -1;
+  dragStartRow = -1;
+  dragStarted = false;
+  dragButton = 0;
 
   // Timestamp of last stdin chunk. Used to detect long gaps (tmux attach,
   // ssh reconnect, laptop wake) and trigger terminal mode re-assert.
@@ -383,6 +413,39 @@ export default class App extends PureComponent<Props, State> {
     }
     this.props.onExit(error);
   };
+
+  /**
+   * Route a wheel event to the deepest scroll container under the pointer.
+   *
+   * Wheel is independent of the mouse-clicks toggle (isMouseClicksDisabled)
+   * and of text selection: scrolling must keep working in the transcript
+   * even where click handling is suppressed.
+   */
+  handleWheel = (w: ParsedWheel): void => {
+    // Terminal coords are 1-indexed; the screen buffer is 0-indexed.
+    this.props.onWheelAt(w.col - 1, w.row - 1, w.deltaY, w.deltaX, w.button);
+  };
+
+  /** Cancel any in-flight drag session, firing dragend if it had started. */
+  cancelDrag = (col: number, row: number): void => {
+    if (this.dragTarget === null) return;
+    if (this.dragStarted) {
+      dispatchDragEvent(
+        this.dragTarget,
+        'dragend',
+        col,
+        row,
+        this.dragStartCol,
+        this.dragStartRow,
+        this.dragButton,
+      );
+    }
+    this.dragTarget = null;
+    this.dragStarted = false;
+    this.dragStartCol = -1;
+    this.dragStartRow = -1;
+    this.dragButton = 0;
+  };
   handleTerminalFocus = (isFocused: boolean): void => {
     // setTerminalFocused notifies subscribers: TerminalFocusProvider (context)
     // and Clock (interval speed) — no App setState needed.
@@ -506,6 +569,15 @@ export function processKeysInBatch(app: App, items: ParsedInput[], _unused1: und
       setTerminalFocused(true);
     }
 
+    // Wheel packets are not keystrokes: route them to the scroll container
+    // under the pointer. They are ALSO reported as ParsedKey
+    // ('wheelup'/'wheeldown') by the parser, so the keybinding system keeps
+    // working; this branch only adds pointer-position routing.
+    if (item.kind === 'wheel') {
+      app.handleWheel(item);
+      continue;
+    }
+
     // Handle Ctrl+Z (suspend) using parsed key to support both raw (\x1a) and
     // CSI u format (\x1b[122;5u) from Kitty keyboard protocol terminals
     if (item.name === 'z' && item.ctrl && SUPPORTS_SUSPEND) {
@@ -555,9 +627,42 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
     if (baseButton !== 0) {
       // Non-left press breaks the multi-click chain.
       app.clickCount = 0;
+
+      // Right-button press fires the context-menu event (DOM fires
+      // contextmenu on mousedown). Bubbles from the deepest hit node, so a
+      // handler can anchor a popup menu at the pointer.
+      if (baseButton === 2) {
+        app.props.onContextMenuAt(col, row, m.button);
+      }
       return;
     }
     if ((m.button & 0x20) !== 0) {
+      // Component-level drag: fire dragstart on first motion, dragmove after.
+      // DOM semantics — a press with no movement never fires drag events.
+      if (app.dragTarget !== null) {
+        if (!app.dragStarted) {
+          app.dragStarted = true;
+          dispatchDragEvent(
+            app.dragTarget,
+            'dragstart',
+            col,
+            row,
+            app.dragStartCol,
+            app.dragStartRow,
+            m.button,
+          );
+        } else {
+          dispatchDragEvent(
+            app.dragTarget,
+            'dragmove',
+            col,
+            row,
+            app.dragStartCol,
+            app.dragStartRow,
+            m.button,
+          );
+        }
+      }
       // Drag motion: mode-aware extension (char/word/line). onSelectionDrag
       // calls notifySelectionChange internally — no extra onSelectionChange.
       app.props.onSelectionDrag(col, row);
@@ -595,6 +700,21 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
       app.props.onMultiClick(col, row, count);
       return;
     }
+    // Open a drag session if the ancestor chain wants one. Modifier presses
+    // are excluded so the baseline text-selection gesture (shift-click,
+    // alt-drag for rectangular select) is preserved. The session stays
+    // DORMANT until the first motion: a press+release with no movement must
+    // still resolve to a plain click.
+    if ((m.button & (0x04 | 0x08 | 0x10)) === 0) {
+      const target = findDragTarget(app.props.rootNode, col, row);
+      if (target !== null) {
+        app.dragTarget = target;
+        app.dragStartCol = col;
+        app.dragStartRow = row;
+        app.dragStarted = false;
+        app.dragButton = m.button;
+      }
+    }
     startSelection(sel, col, row);
     // SGR bit 0x08 = alt (xterm.js wires altKey here, not metaKey — see
     // comment at the hyperlink-open guard below). On macOS xterm.js,
@@ -612,11 +732,19 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
   // scroll boundary. Only act on non-left releases when we ARE dragging
   // (so an unrelated middle/right click-release doesn't touch selection).
   if (baseButton !== 0) {
+    // End any component drag session on ANY button release: the session was
+    // opened by a left press, but a lost/odd release encoding (motion bit,
+    // button=3) must not orphan dragStarted=true forever.
+    app.cancelDrag(col, row);
     if (!sel.isDragging) return;
     finishSelection(sel);
     app.props.onSelectionChange();
     return;
   }
+  // Normal left release: close the drag session (fires dragend when the
+  // session had actually started; a press+release with no movement fires
+  // nothing and still resolves to a click below).
+  app.cancelDrag(col, row);
   finishSelection(sel);
   // NOTE: unlike the old release-based detection we do NOT reset clickCount
   // on release-after-drag. This aligns with NSEvent.clickCount semantics:

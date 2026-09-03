@@ -19,7 +19,13 @@ import * as dom from './dom.js';
 import { KeyboardEvent } from './events/keyboard-event.js';
 import { FocusManager } from './focus.js';
 import { emptyFrame, type Frame, type FrameEvent } from './frame.js';
-import { dispatchClick, dispatchHover } from './hit-test.js';
+import {
+  dispatchClick,
+  dispatchContextMenu,
+  dispatchHoverOptimized,
+  dispatchWheel,
+  invalidateNoInterestRect,
+} from './hit-test.js';
 import instances from './instances.js';
 import { LogUpdate } from './log-update.js';
 import { nodeCache } from './node-cache.js';
@@ -450,6 +456,9 @@ export default class Ink {
     // recorded since the last paint; the renderer adds per-ScrollBox scroll
     // geometry during this paint, and endGeometryFrame flushes one JSONL line.
     beginGeometryFrame(this.frameCount++);
+    // Cached hover rects are only valid against the layout they were
+    // computed from; drop them so the next hover re-scans.
+    invalidateNoInterestRect();
     const terminalWidth = this.options.stdout.columns || 80;
     const terminalRows = this.options.stdout.rows || 24;
     const frame = this.renderer({
@@ -1284,7 +1293,32 @@ export default class Ink {
   }
   dispatchHover(col: number, row: number): void {
     if (!this.altScreenActive) return;
-    dispatchHover(this.rootNode, col, row, this.hoveredNodes);
+    dispatchHoverOptimized(this.rootNode, col, row, this.hoveredNodes);
+  }
+
+  /**
+   * Route a wheel event to the deepest scroll container under the pointer.
+   * Requires mouse tracking (alt-screen) — outside it the terminal's own
+   * scrollback owns the wheel and there are no cached rects to hit-test.
+   */
+  dispatchWheel(
+    col: number,
+    row: number,
+    deltaY: number,
+    deltaX: number,
+    button: number,
+  ): boolean {
+    if (!this.altScreenActive) return false;
+    return dispatchWheel(this.rootNode, col, row, deltaY, deltaX, button);
+  }
+
+  /**
+   * Dispatch a context-menu event on right-button press. Requires mouse
+   * tracking (alt-screen) like dispatchClick.
+   */
+  dispatchContextMenu(col: number, row: number, button: number): boolean {
+    if (!this.altScreenActive) return false;
+    return dispatchContextMenu(this.rootNode, col, row, button);
   }
   dispatchKeyboardEvent(parsedKey: ParsedKey): void {
     const target = this.focusManager.activeElement ?? this.rootNode;
@@ -1461,7 +1495,7 @@ export default class Ink {
   };
   render(node: ReactNode): void {
     this.currentNode = node;
-    const tree = <App stdin={this.options.stdin} stdout={this.options.stdout} stderr={this.options.stderr} exitOnCtrlC={this.options.exitOnCtrlC} onExit={this.unmount} terminalColumns={this.terminalColumns} terminalRows={this.terminalRows} selection={this.selection} onSelectionChange={this.notifySelectionChange} onClickAt={this.dispatchClick} onHoverAt={this.dispatchHover} getHyperlinkAt={this.getHyperlinkAt} onOpenHyperlink={this.openHyperlink} onMultiClick={this.handleMultiClick} onSelectionDrag={this.handleSelectionDrag} onStdinResume={this.reassertTerminalModes} onCursorDeclaration={this.setCursorDeclaration} dispatchKeyboardEvent={this.dispatchKeyboardEvent}>
+    const tree = <App stdin={this.options.stdin} stdout={this.options.stdout} stderr={this.options.stderr} exitOnCtrlC={this.options.exitOnCtrlC} onExit={this.unmount} terminalColumns={this.terminalColumns} terminalRows={this.terminalRows} selection={this.selection} onSelectionChange={this.notifySelectionChange} onClickAt={this.dispatchClick} onHoverAt={this.dispatchHover} onWheelAt={this.dispatchWheel} onContextMenuAt={this.dispatchContextMenu} rootNode={this.rootNode} getHyperlinkAt={this.getHyperlinkAt} onOpenHyperlink={this.openHyperlink} onMultiClick={this.handleMultiClick} onSelectionDrag={this.handleSelectionDrag} onStdinResume={this.reassertTerminalModes} onCursorDeclaration={this.setCursorDeclaration} dispatchKeyboardEvent={this.dispatchKeyboardEvent}>
         <TerminalWriteProvider value={this.writeRaw}>
           {node}
         </TerminalWriteProvider>
