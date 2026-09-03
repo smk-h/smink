@@ -76,6 +76,7 @@ export { default as measureElement } from './ink/measure-element.js'
 export { supportsTabStatus } from './ink/termio/osc.js'
 export { default as wrapText } from './ink/wrap-text.js'
 export { truncateToWidth } from './ink/truncateToWidth.js'
+export { getTerminalFlushTick, noteTerminalFlush } from './ink/flush-tick.js'
 export { colorize } from './ink/colorize.js'
 
 // Re-export contexts (all use default exports)

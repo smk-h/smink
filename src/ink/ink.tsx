@@ -34,6 +34,7 @@ import { CellWidth, CharPool, cellAt, createScreen, HyperlinkPool, isEmptyCellAt
 import { applySearchHighlight } from './searchHighlight.js';
 import { applySelectionOverlay, captureScrolledRows, clearSelection, createSelectionState, extendSelection, type FocusMove, findPlainTextUrlAt, getSelectedText, hasSelection, moveFocus, type SelectionState, selectLineAt, selectWordAt, shiftAnchor, shiftSelection, shiftSelectionForFollow, startSelection, updateSelection } from './selection.js';
 import { SYNC_OUTPUT_SUPPORTED, supportsExtendedKeys, type Terminal, writeDiffToTerminal } from './terminal.js';
+import { noteTerminalFlush } from './flush-tick.js';
 import { CURSOR_HOME, cursorMove, cursorPosition, DISABLE_KITTY_KEYBOARD, DISABLE_MODIFY_OTHER_KEYS, ENABLE_KITTY_KEYBOARD, ENABLE_MODIFY_OTHER_KEYS, ERASE_SCREEN } from './termio/csi.js';
 import { DBP, DFE, DISABLE_MOUSE_TRACKING, ENABLE_MOUSE_TRACKING, ENTER_ALT_SCREEN, EXIT_ALT_SCREEN, SHOW_CURSOR } from './termio/dec.js';
 import { CLEAR_ITERM2_PROGRESS, CLEAR_TAB_STATUS, setClipboard, supportsTabStatus, wrapForMultiplexer } from './termio/osc.js';
@@ -735,6 +736,10 @@ export default class Ink {
     const tWrite = performance.now();
     writeDiffToTerminal(this.terminal, optimized, this.altScreenActive && !SYNC_OUTPUT_SUPPORTED);
     const writeMs = performance.now() - tWrite;
+    // The frame is on screen: advance the flush counter so components that
+    // must not unmount before being painted (main-screen scrollback keeps
+    // no copy of a skipped row) can distinguish "committed" from "written".
+    noteTerminalFlush();
 
     // Update blit safety for the NEXT frame. The frame just rendered
     // becomes frontFrame (= next frame's prevScreen). If we applied the
