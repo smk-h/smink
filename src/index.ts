@@ -56,6 +56,7 @@ export { useTabStatus } from './ink/hooks/use-tab-status.js'
 export { useTerminalFocus } from './ink/hooks/use-terminal-focus.js'
 export { useTerminalTitle } from './ink/hooks/use-terminal-title.js'
 export { useTerminalSize } from './ink/hooks/use-terminal-size.js'
+export { useCopyOnSelect } from './ink/hooks/use-copy-on-select.js'
 export { useTerminalViewport } from './ink/hooks/use-terminal-viewport.js'
 
 // Re-export types
