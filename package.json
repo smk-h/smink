@@ -23,6 +23,7 @@
     "test:early": "npx tsx examples/early-input-test.tsx",
     "test:early:seed": "npx tsx examples/early-input-test.tsx --seed \"hello world 自动注入的文本\"",
     "test:key-capture": "npx tsx examples/key-capture.tsx",
+    "test:truncate": "npx tsx examples/truncate-to-width.tsx",
     "pack:dry-run": "npm pack --dry-run",
     "pack:tgz": "npm pack",
     "pack:list": "tar -tzf smai-kit-smink-%npm_package_version%.tgz"
