@@ -127,10 +127,15 @@ function getEventPriority(eventType: string): number {
     case 'focus':
     case 'blur':
     case 'paste':
+    case 'contextmenu':
       return DiscreteEventPriority as number
     case 'resize':
     case 'scroll':
     case 'mousemove':
+    case 'wheel':
+    case 'dragstart':
+    case 'dragmove':
+    case 'dragend':
       return ContinuousEventPriority as number
     default:
       return DefaultEventPriority as number

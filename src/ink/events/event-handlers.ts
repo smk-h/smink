@@ -1,8 +1,11 @@
 import type { ClickEvent } from './click-event.js'
+import type { ContextMenuEvent } from './context-menu-event.js'
+import type { DragEvent } from './drag-event.js'
 import type { FocusEvent } from './focus-event.js'
 import type { KeyboardEvent } from './keyboard-event.js'
 import type { PasteEvent } from './paste-event.js'
 import type { ResizeEvent } from './resize-event.js'
+import type { WheelEvent } from './wheel-event.js'
 
 type KeyboardEventHandler = (event: KeyboardEvent) => void
 type FocusEventHandler = (event: FocusEvent) => void
@@ -10,6 +13,9 @@ type PasteEventHandler = (event: PasteEvent) => void
 type ResizeEventHandler = (event: ResizeEvent) => void
 type ClickEventHandler = (event: ClickEvent) => void
 type HoverEventHandler = () => void
+type WheelEventHandler = (event: WheelEvent) => void
+type DragEventHandler = (event: DragEvent) => void
+type ContextMenuEventHandler = (event: ContextMenuEvent) => void
 
 /**
  * Props for event handlers on Box and other host components.
@@ -35,6 +41,14 @@ export type EventHandlerProps = {
   onClick?: ClickEventHandler
   onMouseEnter?: HoverEventHandler
   onMouseLeave?: HoverEventHandler
+
+  onWheel?: WheelEventHandler
+
+  onDragStart?: DragEventHandler
+  onDragMove?: DragEventHandler
+  onDragEnd?: DragEventHandler
+
+  onContextMenu?: ContextMenuEventHandler
 }
 
 /**
@@ -51,6 +65,11 @@ export const HANDLER_FOR_EVENT: Record<
   paste: { bubble: 'onPaste', capture: 'onPasteCapture' },
   resize: { bubble: 'onResize' },
   click: { bubble: 'onClick' },
+  wheel: { bubble: 'onWheel' },
+  dragstart: { bubble: 'onDragStart' },
+  dragmove: { bubble: 'onDragMove' },
+  dragend: { bubble: 'onDragEnd' },
+  contextmenu: { bubble: 'onContextMenu' },
 }
 
 /**
@@ -70,4 +89,9 @@ export const EVENT_HANDLER_PROPS = new Set<string>([
   'onClick',
   'onMouseEnter',
   'onMouseLeave',
+  'onWheel',
+  'onDragStart',
+  'onDragMove',
+  'onDragEnd',
+  'onContextMenu',
 ])
