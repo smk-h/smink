@@ -86,6 +86,11 @@ export { supportsTabStatus } from './ink/termio/osc.js'
 export { default as wrapText } from './ink/wrap-text.js'
 export { truncateToWidth } from './ink/truncateToWidth.js'
 export { getTerminalFlushTick, noteTerminalFlush } from './ink/flush-tick.js'
+export {
+  clearInputSuppression,
+  isInputSuppressed,
+  suppressInputFor,
+} from './ink/input-suppression.js'
 export { colorize } from './ink/colorize.js'
 
 // Re-export contexts (all use default exports)

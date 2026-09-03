@@ -28,6 +28,7 @@
     "test:terminal-size": "npx tsx examples/terminal-size.tsx",
     "test:copy-on-select": "npx tsx examples/copy-on-select.tsx",
     "test:overflow-guard": "npx tsx examples/update-overflow-guard.tsx",
+    "test:input-suppression": "npx tsx examples/input-suppression.tsx",
     "pack:dry-run": "npm pack --dry-run",
     "pack:tgz": "npm pack",
     "pack:list": "tar -tzf smai-kit-smink-%npm_package_version%.tgz"

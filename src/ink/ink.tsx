@@ -14,7 +14,7 @@ import { format } from 'util';
 import { colorize } from './colorize.js';
 import App from './components/App.js';
 import type { CursorDeclaration, CursorDeclarationSetter } from './components/CursorDeclarationContext.js';
-import { FRAME_INTERVAL_MS } from './constants.js';
+import { FRAME_INTERVAL_MS, STDIN_HANDOFF_SUPPRESSION_MS } from './constants.js';
 import * as dom from './dom.js';
 import { KeyboardEvent } from './events/keyboard-event.js';
 import { FocusManager } from './focus.js';
@@ -35,6 +35,7 @@ import { applySearchHighlight } from './searchHighlight.js';
 import { applySelectionOverlay, captureScrolledRows, clearSelection, createSelectionState, extendSelection, type FocusMove, findPlainTextUrlAt, getSelectedText, hasSelection, moveFocus, type SelectionState, selectLineAt, selectWordAt, shiftAnchor, shiftSelection, shiftSelectionForFollow, startSelection, updateSelection } from './selection.js';
 import { SYNC_OUTPUT_SUPPORTED, supportsExtendedKeys, type Terminal, writeDiffToTerminal } from './terminal.js';
 import { noteTerminalFlush } from './flush-tick.js';
+import { suppressInputFor } from './input-suppression.js';
 import { CURSOR_HOME, cursorMove, cursorPosition, DISABLE_KITTY_KEYBOARD, DISABLE_MODIFY_OTHER_KEYS, ENABLE_KITTY_KEYBOARD, ENABLE_MODIFY_OTHER_KEYS, ERASE_SCREEN } from './termio/csi.js';
 import { DBP, DFE, DISABLE_MOUSE_TRACKING, ENABLE_MOUSE_TRACKING, ENTER_ALT_SCREEN, EXIT_ALT_SCREEN, SHOW_CURSOR } from './termio/dec.js';
 import { CLEAR_ITERM2_PROGRESS, CLEAR_TAB_STATUS, setClipboard, supportsTabStatus, wrapForMultiplexer } from './termio/osc.js';
@@ -404,6 +405,11 @@ export default class Ink {
     '\x1b[?25l' // hide cursor (Ink manages)
     );
     this.resumeStdin();
+    // resumeStdin drains what is already buffered, but the editor's own
+    // restore chatter arrives asynchronously (mode-restore replies, query
+    // responses, mouse fragments). Open a suppression window so none of it
+    // is parsed as user input — a stray ESC would read as the escape key.
+    suppressInputFor(STDIN_HANDOFF_SUPPRESSION_MS);
     if (this.altScreenActive) {
       this.resetFramesForAltScreen();
     } else {

@@ -9,6 +9,7 @@ import { EventEmitter } from '../events/emitter.js';
 import { InputEvent } from '../events/input-event.js';
 import { TerminalFocusEvent } from '../events/terminal-focus-event.js';
 import { INITIAL_STATE, type ParsedInput, type ParsedKey, type ParsedMouse, parseMultipleKeypresses } from '../parse-keypress.js';
+import { isInputSuppressed } from '../input-suppression.js';
 import reconciler from '../reconciler.js';
 import { finishSelection, hasSelection, type SelectionState, startSelection } from '../selection.js';
 import { isXtermJs, setXtversionName, supportsExtendedKeys } from '../terminal.js';
@@ -441,7 +442,16 @@ export default class App extends PureComponent<Props, State> {
 
 // Helper to process all keys within a single discrete update context.
 // discreteUpdates expects (fn, a, b, c, d) -> fn(a, b, c, d)
-function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined, _unused2: undefined): void {
+// Exported for testing: lets a harness assert the input-suppression gate
+// without a real TTY (the stdin pipeline needs raw mode to mount).
+export function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined, _unused2: undefined): void {
+  // Terminal handoff suppression window: drop everything that arrives while
+  // it is open. stdin was owned by another TUI (editor) and what lands now
+  // is its restore chatter (rmcup/mode-restore, async query replies, mouse
+  // fragments), not user keystrokes. A stray ESC in that burst reads as the
+  // escape key and wipes a non-empty prompt, so no listener may see it —
+  // including the querier (the late replies are the editor's, not ours).
+  if (isInputSuppressed()) return;
   // Update interaction time for notification timeout tracking.
   // This is called from the central input handler to avoid having multiple
   // stdin listeners that can cause race conditions and dropped input.
