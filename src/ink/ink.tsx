@@ -14,7 +14,7 @@ import { format } from 'util';
 import { colorize } from './colorize.js';
 import App from './components/App.js';
 import type { CursorDeclaration, CursorDeclarationSetter } from './components/CursorDeclarationContext.js';
-import { FRAME_INTERVAL_MS, STDIN_HANDOFF_SUPPRESSION_MS } from './constants.js';
+import { FRAME_INTERVAL_MS, PTY_BACKLOG_BYTES, STDIN_HANDOFF_SUPPRESSION_MS } from './constants.js';
 import * as dom from './dom.js';
 import { KeyboardEvent } from './events/keyboard-event.js';
 import { FocusManager } from './focus.js';
@@ -481,6 +481,44 @@ export default class Ink {
     }
     this.onRender();
   }
+
+  /**
+   * Schedule the next scroll-drain frame — Grok Build's Presenter, ported.
+   * Grok keeps TWO cadence knobs (min_draw_ms for renders, scroll_ms for
+   * scroll); collapsing both to FRAME_INTERVAL_MS made big flicks steppy
+   * (the proportional step, 75%-of-remaining, × 4× the interval = chunky
+   * ramp and ~4× longer settle), so the drain keeps its own fast cadence:
+   *
+   *  - CADENCE: quarter interval (~250fps). Drain frames are cheap
+   *    (DECSTBM + ~10 patches); scroll throughput is unchanged.
+   *  - IN-FLIGHT GATE: while stdout still holds unflushed bytes above
+   *    PTY_BACKLOG_BYTES (slow ConPTY round trip, ssh link), queue nothing
+   *    further — re-probe at quarter interval instead. Grok's equivalent
+   *    (in_flight_target + writer ack) exists to keep latency bounded
+   *    under exactly this backpressure; without it each stacked frame adds
+   *    its full render+write to the input→paint latency, which reads as
+   *    sticky, laggy scrolling on Windows terminals.
+   *
+   * The gate holds only DRAIN frames; React-driven renders (keystrokes,
+   * streaming) still render via the normal throttle — user-visible updates
+   * must never wait behind scroll output.
+   */
+  private scheduleDrain(): void {
+    if (this.drainTimer !== null) return;
+    const stdout = this.options.stdout;
+    const backlog =
+      typeof (stdout as { writableLength?: number }).writableLength === 'number'
+        ? (stdout as { writableLength: number }).writableLength
+        : 0;
+    if (backlog > PTY_BACKLOG_BYTES) {
+      this.drainTimer = setTimeout(() => {
+        this.drainTimer = null;
+        this.scheduleDrain();
+      }, FRAME_INTERVAL_MS >> 2);
+      return;
+    }
+    this.drainTimer = setTimeout(this.renderNow, FRAME_INTERVAL_MS >> 2);
+  }
   onRender() {
     if (this.isUnmounted || this.isPaused) {
       return;
@@ -829,11 +867,12 @@ export default class Ink {
     // Drain frames are cheap (DECSTBM + ~10 patches, ~200 bytes) so run at
     // quarter interval (~250fps, setTimeout practical floor) for max scroll
     // speed. Regular renders stay at FRAME_INTERVAL_MS via the throttle.
+    // scheduleDrain adds the pty backpressure gate on top of that cadence
+    // (see there). renderNow (not onRender) so the drain frame bumps the
+    // generation: a microtask queued by the React commit that produced this
+    // frame must not fire after the drain and repaint the pre-drain layout.
     if (frame.scrollDrainPending) {
-      // renderNow (not onRender) so the drain frame bumps the generation:
-      // a microtask queued by the React commit that produced this frame
-      // must not fire after the drain and repaint the pre-drain layout.
-      this.drainTimer = setTimeout(this.renderNow, FRAME_INTERVAL_MS >> 2);
+      this.scheduleDrain();
     }
     const yogaMs = getLastYogaMs();
     const commitMs = getLastCommitMs();
