@@ -109,6 +109,11 @@ export default class Ink {
   private backFrame: Frame;
   private lastPoolResetTime = performance.now();
   private drainTimer: ReturnType<typeof setTimeout> | null = null;
+  // Every scheduled microtask carries the generation that created it. Immediate
+  // renders (pause/resume/forceRedraw/selection/unmount/resize) invalidate older
+  // trailing work before it can append an old frame.
+  private renderGeneration = 0;
+  private pendingRenderGeneration: number | null = null;
   private lastYogaCounters: {
     ms: number;
     visited: number;
@@ -219,8 +224,18 @@ export default class Ink {
     // effects have committed, so the native cursor tracks the caret without
     // a one-keystroke lag. Same event-loop tick, so throughput is unchanged.
     // Test env uses onImmediateRender (direct onRender, no throttle) so
-    // existing synchronous lastFrame() tests are unaffected.
-    const deferredRender = (): void => queueMicrotask(this.onRender);
+    // existing synchronous lastFrame() tests are unaffected. Keep a
+    // generation on the microtask: an immediate render may supersede the
+    // leading frame before its deferred callback runs.
+    const deferredRender = (): void => {
+      const generation = ++this.renderGeneration;
+      this.pendingRenderGeneration = generation;
+      queueMicrotask(() => {
+        if (this.pendingRenderGeneration !== generation || this.renderGeneration !== generation) return;
+        this.pendingRenderGeneration = null;
+        this.onRender();
+      });
+    };
     this.scheduleRender = throttle(deferredRender, FRAME_INTERVAL_MS, {
       leading: true,
       trailing: true
@@ -246,7 +261,7 @@ export default class Ink {
     this.rootNode.focusManager = this.focusManager;
     this.renderer = createRenderer(this.rootNode, this.stylePool);
     this.rootNode.onRender = this.scheduleRender;
-    this.rootNode.onImmediateRender = this.onRender;
+    this.rootNode.onImmediateRender = this.renderNow;
     this.rootNode.onComputeLayout = () => {
       // Calculate layout during React's commit phase so useLayoutEffect hooks
       // have access to fresh layout data
@@ -350,6 +365,19 @@ export default class Ink {
     // Re-render the React tree with updated props so the context value changes.
     // React's commit phase will call onComputeLayout() to recalculate yoga layout
     // with the new dimensions, then call onRender() to render the updated frame.
+    // Invalidate every render that was scheduled against the OLD size: a
+    // queued microtask generation or a scroll-drain timer would otherwise
+    // fire after this resize completes and paint a frame computed for the
+    // pre-resize layout (mixed-width rows, off-by-reflow writes). The
+    // re-render below schedules fresh work at the new dimensions.
+    this.renderGeneration++;
+    this.pendingRenderGeneration = null;
+    this.scheduleRender.cancel?.();
+    if (this.drainTimer !== null) {
+      clearTimeout(this.drainTimer);
+      this.drainTimer = null;
+    }
+
     // We don't call scheduleRender() here because that would render before the
     // layout is updated, causing a mismatch between viewport and content dimensions.
     if (this.currentNode !== null) {
@@ -433,6 +461,25 @@ export default class Ink {
     // Kitty stack balanced (a well-behaved editor restores our entry, so
     // without the pop we'd accumulate depth on each editor round-trip).
     this.options.stdout.write('\x1b[?1004h' + (supportsExtendedKeys() ? DISABLE_KITTY_KEYBOARD + ENABLE_KITTY_KEYBOARD + ENABLE_MODIFY_OTHER_KEYS : ''));
+  }
+  /**
+   * Render synchronously and invalidate older trailing/drain callbacks.
+   *
+   * The throttle's trailing edge hands `deferredRender` a microtask; if an
+   * immediate render lands first (pause, resume, forceRedraw, selection
+   * change, unmount, resize), that microtask would still fire afterwards and
+   * paint a frame built from a superseded React commit. Bumping the
+   * generation makes the stale microtask bail at its guard.
+   */
+  private renderNow(): void {
+    this.renderGeneration++;
+    this.pendingRenderGeneration = null;
+    this.scheduleRender.cancel?.();
+    if (this.drainTimer !== null) {
+      clearTimeout(this.drainTimer);
+      this.drainTimer = null;
+    }
+    this.onRender();
   }
   onRender() {
     if (this.isUnmounted || this.isPaused) {
@@ -783,7 +830,10 @@ export default class Ink {
     // quarter interval (~250fps, setTimeout practical floor) for max scroll
     // speed. Regular renders stay at FRAME_INTERVAL_MS via the throttle.
     if (frame.scrollDrainPending) {
-      this.drainTimer = setTimeout(() => this.onRender(), FRAME_INTERVAL_MS >> 2);
+      // renderNow (not onRender) so the drain frame bumps the generation:
+      // a microtask queued by the React commit that produced this frame
+      // must not fire after the drain and repaint the pre-drain layout.
+      this.drainTimer = setTimeout(this.renderNow, FRAME_INTERVAL_MS >> 2);
     }
     const yogaMs = getLastYogaMs();
     const commitMs = getLastCommitMs();
@@ -820,12 +870,12 @@ export default class Ink {
     // Flush pending React updates and render before pausing.
     // @ts-ignore flushSyncFromReconciler exists in react-reconciler 0.31 but not in @types/react-reconciler
     reconciler.flushSyncFromReconciler();
-    this.onRender();
+    this.renderNow();
     this.isPaused = true;
   }
   resume(): void {
     this.isPaused = false;
-    this.onRender();
+    this.renderNow();
   }
 
   /**
@@ -863,7 +913,7 @@ export default class Ink {
       // diff sees no content. onRender resets the flag at frame end.
       this.prevFrameContaminated = true;
     }
-    this.onRender();
+    this.renderNow();
   }
 
   /**
@@ -1275,7 +1325,7 @@ export default class Ink {
     return () => this.selectionListeners.delete(cb);
   }
   private notifySelectionChange(): void {
-    this.onRender();
+    this.renderNow();
     for (const cb of this.selectionListeners) cb();
   }
 
@@ -1510,7 +1560,10 @@ export default class Ink {
     if (this.isUnmounted) {
       return;
     }
-    this.onRender();
+    // Invalidate any in-flight deferred render first: the final frame must
+    // be the one painted here, and no stale microtask may touch Yoga nodes
+    // that are about to be freed.
+    this.renderNow();
     this.unsubscribeExit();
     if (typeof this.restoreConsole === 'function') {
       this.restoreConsole();
