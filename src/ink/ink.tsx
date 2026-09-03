@@ -35,6 +35,7 @@ import { applySearchHighlight } from './searchHighlight.js';
 import { applySelectionOverlay, captureScrolledRows, clearSelection, createSelectionState, extendSelection, type FocusMove, findPlainTextUrlAt, getSelectedText, hasSelection, moveFocus, type SelectionState, selectLineAt, selectWordAt, shiftAnchor, shiftSelection, shiftSelectionForFollow, startSelection, updateSelection } from './selection.js';
 import { SYNC_OUTPUT_SUPPORTED, supportsExtendedKeys, type Terminal, writeDiffToTerminal } from './terminal.js';
 import { noteTerminalFlush } from './flush-tick.js';
+import { beginGeometryFrame, endGeometryFrame, noteFrameCause } from './geometry-trace.js';
 import { suppressInputFor } from './input-suppression.js';
 import { CURSOR_HOME, cursorMove, cursorPosition, DISABLE_KITTY_KEYBOARD, DISABLE_MODIFY_OTHER_KEYS, ENABLE_KITTY_KEYBOARD, ENABLE_MODIFY_OTHER_KEYS, ERASE_SCREEN } from './termio/csi.js';
 import { DBP, DFE, DISABLE_MOUSE_TRACKING, ENABLE_MOUSE_TRACKING, ENTER_ALT_SCREEN, EXIT_ALT_SCREEN, SHOW_CURSOR } from './termio/dec.js';
@@ -150,6 +151,8 @@ export default class Ink {
   // LF-induced scroll when screen.height === terminalRows) and gates
   // alt-screen-aware SIGCONT/resize/unmount handling.
   private altScreenActive = false;
+  /** Monotonic frame id for geometry forensics (see geometry-trace.ts). */
+  private frameCount = 0;
   // Set alongside altScreenActive so SIGCONT resume knows whether to
   // re-enable mouse tracking (not all <AlternateScreen> uses want it).
   private altScreenMouseTracking = false;
@@ -309,6 +312,7 @@ export default class Ink {
   // blank→paint flicker). useVirtualScroll's height scaling already bounds
   // the per-resize cost; synchronous handling keeps dimensions consistent.
   private handleResize = () => {
+    noteFrameCause('resize');
     const cols = this.options.stdout.columns || 80;
     const rows = this.options.stdout.rows || 24;
     // Terminals often emit 2+ resize events for one user action (window
@@ -442,6 +446,10 @@ export default class Ink {
     // an extra React re-render cycle.
     flushInteractionTime();
     const renderStart = performance.now();
+    // Geometry forensics: inter-frame notes (cause, aux counters) were
+    // recorded since the last paint; the renderer adds per-ScrollBox scroll
+    // geometry during this paint, and endGeometryFrame flushes one JSONL line.
+    beginGeometryFrame(this.frameCount++);
     const terminalWidth = this.options.stdout.columns || 80;
     const terminalRows = this.options.stdout.rows || 24;
     const frame = this.renderer({
@@ -780,6 +788,7 @@ export default class Ink {
       cacheHits: 0,
       live: 0
     };
+    endGeometryFrame(performance.now() - renderStart);
     this.options.onFrame?.({
       durationMs: performance.now() - renderStart,
       phases: {

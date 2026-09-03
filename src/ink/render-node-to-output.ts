@@ -1,6 +1,7 @@
 import indentString from 'indent-string'
 import { applyTextStyles } from './colorize.js'
 import type { DOMElement } from './dom.js'
+import { noteScrollGeometry } from './geometry-trace.js'
 import getMaxWidth from './get-max-width.js'
 import type { Rectangle } from './layout/geometry.js'
 import { LayoutDisplay, LayoutEdge, type LayoutNode } from './layout/node.js'
@@ -847,6 +848,27 @@ function renderNodeToOutput(
         // only after clamp so a wasted no-op frame isn't scheduled.
         if (scrollTop !== cur) node.pendingScrollDelta = undefined
         if (node.pendingScrollDelta !== undefined) scrollDrainNode = node
+        // Geometry forensics: one note per ScrollBox per paint. All the
+        // interesting values (before/after follow, before/after clamp) are
+        // still in scope here and this is the single point where the frame's
+        // final renderScrollTop is settled.
+        noteScrollGeometry({
+          sticky,
+          shrunk: scrollHeight < prevScrollHeight,
+          grew,
+          atBottom,
+          scrollTopBeforeFollow,
+          cur,
+          scrollTop,
+          renderScrollTop: clamped,
+          scrollHeight,
+          prevScrollHeight,
+          innerHeight,
+          maxScroll,
+          prevMaxScroll,
+          clampMin: cMin ?? null,
+          clampMax: cMax ?? null,
+        })
         scrollTop = clamped
 
         if (content && contentYoga) {

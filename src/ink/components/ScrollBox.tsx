@@ -3,6 +3,7 @@ import type { Except } from 'type-fest';
 import { markScrollActivity } from '../../bootstrap/state.js';
 import type { DOMElement } from '../dom.js';
 import { markDirty, scheduleRenderFrom } from '../dom.js';
+import { noteFrameCause } from '../geometry-trace.js';
 import { markCommitStart } from '../reconciler.js';
 import type { Styles } from '../styles.js';
 import Box from './Box.js';
@@ -100,6 +101,10 @@ function ScrollBox({
     for (const l of listenersRef.current) l();
   };
   function scrollMutated(el: DOMElement): void {
+    // Geometry forensics: tag the frame this mutation is about to trigger.
+    // First note in the inter-frame window wins, so a batch of scrollBy calls
+    // collapsing into one frame still reports the originating cause.
+    noteFrameCause('scroll');
     // Signal background intervals (IDE poll, LSP poll, GCS fetch, orphan
     // check) to skip their next tick — they compete for the event loop and
     // contributed to 1402ms max frame gaps during scroll drain.

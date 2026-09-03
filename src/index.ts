@@ -91,6 +91,14 @@ export {
   isInputSuppressed,
   suppressInputFor,
 } from './ink/input-suppression.js'
+export {
+  GEOMETRY_TRACE_ENABLED,
+  noteAuxNumber,
+  noteFrameCause,
+  noteScrollGeometry,
+  type FrameCause,
+  type ScrollGeometryNote,
+} from './ink/geometry-trace.js'
 export { colorize } from './ink/colorize.js'
 
 // Re-export contexts (all use default exports)
