@@ -10,9 +10,16 @@
  *   5. callWithUpdateOverflowGuard 对溢出静默吸收、对其他错误透传
  *   6. 进程级守卫可安装且对非溢出错误保持默认语义
  *
+ * 后半段验证接线（模块落地之后的调用点）：
+ *   7. createClock 登记 clock.tick 熔断 quench，震荡触发时真的挂起时钟
+ *   8. clock.tick 回调抛 #185 被吸收，同 tick 的后续订阅者继续跑
+ *   9. Ink 构造时安装进程级兜底；选区通知回调抛 #185 被吸收
+ *
  * 运行：npx tsx examples/update-overflow-guard.tsx
  */
 
+import { EventEmitter } from 'node:events'
+import React from 'react'
 import {
   advanceQuenchCooldownForTest,
   callWithUpdateOverflowGuard,
@@ -22,6 +29,9 @@ import {
   resetUpdateOverflowGuardForTest,
   swallowNestedUpdateOverflow,
 } from '../src/ink/update-overflow-guard.js'
+import { createClock } from '../src/ink/components/ClockContext.js'
+import Ink from '../src/ink/ink.js'
+import { Box, Text } from '../src/index.js'
 
 /** 把指定源的冷却窗口往前拨，避免测试真的等待退避时长。 */
 function advanceCooldown(source: string, ms: number): void {
@@ -167,5 +177,138 @@ for (let i = 0; i < 3; i++) swallowNestedUpdateOverflow(OVERFLOW_A, 'srcB')
 check('srcA 达到阈值触发熔断', sourceQuench.length, 1)
 check('srcB 未达阈值不触发', sourceQuench.length, 1)
 
-console.log(`\n\x1b[1m结果：\x1b[0m ${passed} 通过, ${failed} 失败\n`)
-process.exit(failed === 0 ? 0 : 1)
+async function wiring(): Promise<void> {
+  const sleep = (ms: number): Promise<void> =>
+    new Promise(resolve => setTimeout(resolve, ms))
+
+  console.log('\n\x1b[1m[8] createClock 登记 clock.tick 熔断 quench\x1b[0m')
+
+  resetUpdateOverflowGuardForTest()
+  resetOverflowQuenchesForTest()
+  // createClock 内部 registerOverflowQuench('clock.tick', ...)，
+  // 所以必须在 reset 之后创建。
+  const clock = createClock(16)
+  let ticks = 0
+  clock.subscribe(() => {
+    ticks++
+  }, true)
+
+  await sleep(80)
+  check('时钟在跑（收到 tick）', ticks > 0, true)
+
+  // 连续 5 次 #185 → 达到熔断阈值 → quench 挂起时钟 5s
+  for (let i = 0; i < 5; i++) {
+    swallowNestedUpdateOverflow(OVERFLOW_A, 'clock.tick')
+  }
+  const ticksAtTrip = ticks
+  await sleep(80)
+  check('熔断触发后时钟被挂起（不再有 tick）', ticks, ticksAtTrip)
+
+  // 退避窗口结束后恢复。用一次短挂起验证 resume 路径本身。
+  clock.suspend(30)
+  await sleep(100)
+  check('挂起期满后时钟恢复', ticks > ticksAtTrip, true)
+
+  console.log('\n\x1b[1m[9] clock.tick 回调抛 #185 被吸收\x1b[0m')
+
+  const clock2 = createClock(16)
+  let survivorRan = 0
+  let throwerDone = false
+  // 先订阅的抛 #185：若 tick 未经守卫，这会变成 uncaughtException
+  // 直接杀掉进程（本例未装进程兜底），后面的断言根本不会打印。
+  clock2.subscribe(() => {
+    if (throwerDone) return
+    throwerDone = true
+    throw OVERFLOW_A
+  }, true)
+  clock2.subscribe(() => {
+    survivorRan++
+  }, true)
+
+  await sleep(80)
+  check('抛出方的异常被吸收（进程存活）', throwerDone, true)
+  check('同 tick 的后续订阅者继续收到通知', survivorRan > 0, true)
+
+  console.log('\n\x1b[1m[10] Ink 安装进程兜底 + 选区通知守卫\x1b[0m')
+
+  class FakeStdout extends EventEmitter {
+    columns = 40
+    rows = 6
+    isTTY = false
+    write(): boolean {
+      return true
+    }
+  }
+  class FakeStdin extends EventEmitter {
+    isTTY = false
+    isRaw = false
+    read(): null {
+      return null
+    }
+    resume(): this {
+      return this
+    }
+    pause(): this {
+      return this
+    }
+    ref(): this {
+      return this
+    }
+    unref(): this {
+      return this
+    }
+    setRawMode(): this {
+      return this
+    }
+  }
+
+  const stdout = new FakeStdout() as unknown as NodeJS.WriteStream
+  const before = process.listenerCount('uncaughtException')
+  const ink = new Ink({
+    stdout,
+    stdin: new FakeStdin() as unknown as NodeJS.ReadStream,
+    stderr: stdout,
+    exitOnCtrlC: false,
+    patchConsole: false,
+  })
+  const after = process.listenerCount('uncaughtException')
+  check('Ink 构造时安装进程级兜底', after - before, 1)
+  check('同时安装 unhandledRejection 监听', process.listenerCount('unhandledRejection') > 0, true)
+
+  ink.render(
+    React.createElement(
+      Box,
+      { flexDirection: 'column' },
+      React.createElement(Text, null, 'probe'),
+    ),
+  )
+
+  resetUpdateOverflowGuardForTest()
+  resetOverflowQuenchesForTest()
+  let secondListenerRan = false
+  ink.subscribeToSelectionChange(() => {
+    throw OVERFLOW_B
+  })
+  ink.subscribeToSelectionChange(() => {
+    secondListenerRan = true
+  })
+  // notifySelectionChange 是私有方法，这里直接驱动它以覆盖守卫路径。
+  const notify = (ink as unknown as { notifySelectionChange(): void })
+    .notifySelectionChange
+    .bind(ink) as () => void
+  let notifyThrew = false
+  try {
+    notify()
+  } catch {
+    notifyThrew = true
+  }
+  check('选区回调抛 #185 不向外传播', notifyThrew, false)
+  check('后一个选区订阅者照常执行', secondListenerRan, true)
+
+  ink.unmount()
+}
+
+void wiring().then(() => {
+  console.log(`\n\x1b[1m结果：\x1b[0m ${passed} 通过, ${failed} 失败\n`)
+  process.exit(failed === 0 ? 0 : 1)
+})

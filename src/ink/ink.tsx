@@ -40,6 +40,7 @@ import { CellWidth, CharPool, cellAt, createScreen, HyperlinkPool, isEmptyCellAt
 import { applySearchHighlight } from './searchHighlight.js';
 import { applySelectionOverlay, captureScrolledRows, clearSelection, createSelectionState, extendSelection, type FocusMove, findPlainTextUrlAt, getSelectedText, hasSelection, moveFocus, type SelectionState, selectLineAt, selectWordAt, shiftAnchor, shiftSelection, shiftSelectionForFollow, startSelection, updateSelection } from './selection.js';
 import { SYNC_OUTPUT_SUPPORTED, supportsExtendedKeys, type Terminal, writeDiffToTerminal } from './terminal.js';
+import { callWithUpdateOverflowGuard, installNestedUpdateOverflowProcessGuard } from './update-overflow-guard.js';
 import { noteTerminalFlush } from './flush-tick.js';
 import { beginGeometryFrame, endGeometryFrame, noteFrameCause } from './geometry-trace.js';
 import { suppressInputFor } from './input-suppression.js';
@@ -293,6 +294,11 @@ export default class Ink {
     // onRecoverableError
     noop // onDefaultTransitionIndicator
     );
+    // #185 process backstop: the nested-update overflow can surface from any
+    // timer dispatch (not only the guarded hotspots), which would kill the
+    // process. React resets the counter before throwing, so absorbing the
+    // error class process-wide is safe — see update-overflow-guard.ts.
+    installNestedUpdateOverflowProcessGuard();
     if (process.env.NODE_ENV === 'development') {
       reconciler.injectIntoDevTools({
         bundleType: 0,
@@ -616,8 +622,9 @@ export default class Ink {
         // so useHasSelection re-renders and the footer copy/escape hint
         // disappears. notifySelectionChange() would recurse into onRender;
         // fire the listeners directly — they schedule a React update for
-        // LATER, they don't re-enter this frame.
-        if (cleared) for (const cb of this.selectionListeners) cb();
+        // LATER, they don't re-enter this frame. (#185 self-heal guard:
+        // same as selection.notify.)
+        if (cleared) for (const cb of this.selectionListeners) callWithUpdateOverflowGuard('selection.notify', cb);
       }
     }
 
@@ -1365,7 +1372,11 @@ export default class Ink {
   }
   private notifySelectionChange(): void {
     this.renderNow();
-    for (const cb of this.selectionListeners) cb();
+    // #185 self-heal: selection listeners drive React state; an overflow
+    // throw resets React's nested counter, so absorb and keep the rest.
+    for (const cb of this.selectionListeners) {
+      callWithUpdateOverflowGuard('selection.notify', cb);
+    }
   }
 
   /**
