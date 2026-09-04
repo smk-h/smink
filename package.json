@@ -34,6 +34,8 @@
     "test:timeline-rail": "npx tsx examples/timeline-rail.tsx",
     "test:render-generation": "npx tsx examples/render-generation.tsx",
     "test:backpressure": "npx tsx examples/backpressure.tsx",
+    "test:decstbm": "npx tsx examples/decstbm-scroll.tsx",
+    "test:stress-output": "npx tsx examples/stress-output.tsx",
     "test:pointer-events": "npx tsx examples/pointer-events.tsx",
     "pack:dry-run": "npm pack --dry-run",
     "pack:tgz": "npm pack",
